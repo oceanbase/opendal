@@ -15,9 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-cmake_minimum_required(VERSION 3.24)
-cmake_policy(SET CMP0135 NEW)
-
+cmake_minimum_required(VERSION 3.22)
 project(opendal-c)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -33,18 +31,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # for GoogleTest, it should be no less than C++14
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# fetch google test via GitHub
-include(FetchContent)
-
-set(GOOGLETEST_VERSION 1.15.2)
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/tags/v${GOOGLETEST_VERSION}.zip
-)
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
 
 set(CARGO_DIST_DIR "${PROJECT_SOURCE_DIR}/target/debug")
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -83,11 +69,14 @@ target_link_libraries(basic opendal_c_shared)
 add_executable(error_handle examples/error_handle.c)
 target_link_libraries(error_handle opendal_c_shared)
 
-# test targets
-file(GLOB TEST_SRCS tests/*.cpp)
-add_executable(tests ${TEST_SRCS})
-target_link_libraries(tests opendal_c_shared gtest_main)
-if (TEST_ENABLE_ASAN)
-    target_compile_options(tests PRIVATE -fsanitize=address)
-    target_link_options(tests PRIVATE -fsanitize=address)
-endif()
+install(
+    FILES ${OPENDAL_STATIC_LIB}
+    DESTINATION lib
+)
+
+# 安装头文件
+install(
+    DIRECTORY include/
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h"
+)
