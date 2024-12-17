@@ -41,7 +41,7 @@ export PROJECT_NAME=${PROJECT_NAME}
 export RELEASE=${RELEASE}
 # 打包
 # release rpm
-rpmbuild -vv --define "_topdir $RPM_BUILD_DIR" -bb $CUR_DIR/c-binding.spec
+rpmbuild -vv --define "_topdir $RPM_BUILD_DIR" -bb $CUR_DIR/$PROJECT_NAME.spec
 # 将rpm文件拷贝到rpm目录
 find $RPM_BUILD_DIR/ -name "*.rpm" -exec mv {} $CUR_DIR 2>/dev/null \;
 # 删除.rpm_build目录

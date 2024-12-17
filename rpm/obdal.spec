@@ -1,4 +1,4 @@
-Name: devdeps-obdal
+Name: obdal
 Version: 0.1
 Release: %(echo $RELEASE)
 Url: https://github.com/oceanbase/opendal
