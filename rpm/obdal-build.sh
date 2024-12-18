@@ -14,6 +14,7 @@ else
         RELEASE="$4.al8"
     else
         RELEASE="$4.el${REDHAT}"
+        DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/el/"
     fi
 fi
 
@@ -29,11 +30,34 @@ rm -rf $RPM_BUILD_DIR
 mkdir -p $RPM_BUILD_DIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 # 安装依赖
-wget http://mirrors.aliyun.com/oceanbase/OceanBase.repo -P /etc/yum.repos.d/
-yum install obdevtools-cmake-3.22.1 -y
-yum install obdevtools-gcc9-9.3.0 -y
+if [[ "${ID}"x != "alinux"x ]]; then
+    dep_pkgs=(
+        obdevtools-cmake-3.22.1-22022100417.el
+        obdevtools-gcc9-9.3.0-52022092914.el
+    )
 
-export PATH=/usr/local/oceanbase/devtools/bin:$PATH
+    ARCH=`uname -p`
+    TARGET_DIR_3rd=${CUR_DIR}/deps/3rd
+    PKG_DIR=${TARGET_DIR_3rd}/pkg
+    mkdir -p $PKG_DIR
+
+    for dep in ${dep_pkgs[@]}
+    do
+        TEMP=$(mktemp -p "/" -u ".XXXX")
+        deps_url=${DOWNLOAD_BASE_URL}/${REDHAT}/${ARCH}
+        pkg=${dep}${REDHAT}.${ARCH}.rpm
+        wget $deps_url/$pkg -O $PKG_DIR/$TEMP
+        if [[ $? == 0 ]]; then
+            mv -f $PKG_DIR/$TEMP $PKG_DIR/$pkg 
+        fi 
+        (cd $TARGET_DIR_3rd && rpm2cpio $PKG_DIR/$pkg | cpio -di -u --quiet)
+    done
+
+    export PATH=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin:$PATH
+    export CC=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/gcc
+    export CXX=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/g++
+fi
+
 
 # build rpm
 cd $BASE_DIR
