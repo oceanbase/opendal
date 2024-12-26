@@ -18,6 +18,8 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::os::raw::c_char;
+use std::ffi::CStr;
+use tracing::{span, Level, span::EnteredSpan};
 
 use opendal::Buffer;
 
@@ -173,6 +175,59 @@ impl opendal_operator_options {
         if !ptr.is_null() {
             drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
             drop(Box::from_raw(ptr));
+        }
+    }
+}
+
+#[repr(C)]
+pub struct ObSpan {
+    span: *mut c_void,
+}
+
+impl ObSpan {
+    fn new(tenant_id: u64, trace_id: &str) -> Self {
+        let span = span!(Level::INFO, "", tenant_id = tenant_id, trace_id = trace_id).entered();
+        let option_span = Some(span);
+        let span_ptr = Box::into_raw(Box::new(option_span)) as *mut c_void;
+        ObSpan { span: span_ptr }
+    }
+}
+
+impl Drop for ObSpan {
+    fn drop(&mut self) {
+        if !self.span.is_null() {
+            unsafe {
+                let span_ptr = self.span as *mut Option<EnteredSpan>;
+                let mut span_box: Box<Option<EnteredSpan>> = Box::from_raw(span_ptr);
+                if let Some(span) = span_box.take() {
+                    span.exit();
+                }
+            }
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ob_new_span(tenant_id: u64, trace_id: *const c_char) -> *mut ObSpan {
+    if trace_id.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let c_str = unsafe { CStr::from_ptr(trace_id) };
+    match c_str.to_str() {
+        Ok(trace_id_str) => {
+            let my_span = ObSpan::new(tenant_id, trace_id_str);
+            Box::into_raw(Box::new(my_span))
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ob_drop_span(span: *mut ObSpan) {
+    if !span.is_null() {
+        unsafe {
+            let _ = Box::from_raw(span);
         }
     }
 }

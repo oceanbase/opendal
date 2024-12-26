@@ -20,3 +20,5 @@ perf.*
 
 # Python cache files
 **/__pycache__/
+
+rpm/deps/

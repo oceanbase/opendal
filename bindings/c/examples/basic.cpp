@@ -23,8 +23,21 @@
 
 int main()
 {
+    opendal_error *error = init_obdal_env();
+    assert(error == nullptr);
+    ObSpan *ob_span = ob_new_span(1, "test-trace");
+    assert(ob_span != nullptr);
+    
     /* Initialize a operator for "memory" backend, with no options */
-    opendal_result_operator_new result = opendal_operator_new("memory", 0);
+    opendal_operator_options *options = opendal_operator_options_new();
+    opendal_operator_options_set(options, "bucket", "xxx");
+    opendal_operator_options_set(options, "endpoint", "xxx");
+    opendal_operator_options_set(options, "region", "xxx");
+    opendal_operator_options_set(options, "access_key_id", "xxx");
+    opendal_operator_options_set(options, "secret_access_key", "xxx");
+    opendal_operator_options_set(options, "disable_config_load", "true");
+    opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+    opendal_result_operator_new result = opendal_operator_new("s3", options);
     assert(result.op != NULL);
     assert(result.error == NULL);
 
@@ -37,7 +50,7 @@ int main()
     };
 
     /* Write this into path "/testpath" */
-    opendal_error* error = opendal_operator_write(op, "/testpath", &data);
+    error = opendal_operator_write(op, "/testpath", &data);
     assert(error == NULL);
 
     /* We can read it out, make sure the data is the same */
@@ -57,4 +70,7 @@ int main()
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);
+    ob_drop_span(ob_span);
+
+    return 0;
 }

@@ -63,7 +63,7 @@ target_include_directories(opendal_c_shared INTERFACE include)
 add_dependencies(opendal_c_shared cargo_build)
 
 # example targets
-add_executable(basic examples/basic.c)
+add_executable(basic examples/basic.cpp)
 target_link_libraries(basic opendal_c_shared)
 
 add_executable(error_handle examples/error_handle.c)

@@ -581,6 +581,10 @@ typedef struct opendal_capability {
   bool blocking;
 } opendal_capability;
 
+typedef struct ObSpan {
+  void *span;
+} ObSpan;
+
 /**
  * \brief The is the result type returned by opendal_reader_read().
  * The result type contains a size field, which is the size of the data read,
@@ -707,6 +711,8 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  * ```
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
+
+struct opendal_error *init_obdal_env(void);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
@@ -1399,6 +1405,10 @@ void opendal_operator_options_set(struct opendal_operator_options *self,
  * \brief Free the allocated memory used by [`opendal_operator_options`]
  */
 void opendal_operator_options_free(struct opendal_operator_options *ptr);
+
+struct ObSpan *ob_new_span(uint64_t tenant_id, const char *trace_id);
+
+void ob_drop_span(struct ObSpan *span);
 
 /**
  * \brief Path of entry.

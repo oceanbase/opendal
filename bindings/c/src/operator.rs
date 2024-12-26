@@ -19,6 +19,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::os::raw::c_char;
 use std::str::FromStr;
+use tracing_subscriber;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use ::opendal as core;
 use once_cell::sync::Lazy;
@@ -31,6 +33,17 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         .build()
         .unwrap()
 });
+
+#[no_mangle]
+pub extern "C" fn init_obdal_env() -> *mut opendal_error {
+    match tracing_subscriber::registry().with(fmt::layer()).try_init() {
+        Ok(_) => std::ptr::null_mut(),
+        Err(e) => {
+            let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+            opendal_error::new(err)
+        }
+    }
+}
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -91,6 +104,7 @@ fn build_operator(
         Ok(o) => o,
         Err(e) => return Err(e),
     };
+    op = op.layer(core::layers::TracingLayer);
     if !op.info().full_capability().blocking {
         let runtime =
             tokio::runtime::Handle::try_current().unwrap_or_else(|_| RUNTIME.handle().clone());
