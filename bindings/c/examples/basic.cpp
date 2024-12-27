@@ -19,11 +19,27 @@
 
 #include "assert.h"
 #include "opendal.h"
-#include "stdio.h"
+#include <cstdio>
+#include <cstdlib>
+
+void *my_alloc(size_t size, size_t align) {
+    printf("my_alloc %zu %zu\n", size, align);
+    return malloc(size);
+}
+
+void my_free(void *ptr) {
+    printf("my_free\n");
+    // Implement your custom free logic here
+    free(ptr);
+}
 
 int main()
 {
-    opendal_error *error = init_obdal_env();
+    opendal_error *error = init_obdal_env(nullptr, nullptr);
+    assert(error != nullptr);
+    printf("%s\n", error->message.data);
+
+    error = init_obdal_env(reinterpret_cast<void *>(my_alloc), reinterpret_cast<void *>(my_free));
     assert(error == nullptr);
     ObSpan *ob_span = ob_new_span(1, "test-trace");
     assert(ob_span != nullptr);

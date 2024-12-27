@@ -712,7 +712,7 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
 
-struct opendal_error *init_obdal_env(void);
+struct opendal_error *init_obdal_env(void *alloc, void *free);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.

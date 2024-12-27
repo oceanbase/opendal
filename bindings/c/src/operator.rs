@@ -21,6 +21,7 @@ use std::os::raw::c_char;
 use std::str::FromStr;
 use tracing_subscriber;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use std::alloc::{System, GlobalAlloc, Layout};
 
 use ::opendal as core;
 use once_cell::sync::Lazy;
@@ -34,8 +35,59 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         .unwrap()
 });
 
+pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
+pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
+static mut ALLOC_FN: Option<AllocFn> = None;
+static mut FREE_FN: Option<FreeFn> = None;
+
+struct CustomAllocator;
+
+unsafe impl GlobalAlloc for CustomAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if let Some(alloc_fn) = ALLOC_FN {
+            alloc_fn(layout.size(), layout.align())
+        } else {
+            System.alloc(layout)
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if let Some(free_fn) = FREE_FN {
+            if !ptr.is_null() {
+                free_fn(ptr);
+            }
+        } else {
+            System.dealloc(ptr, layout)
+        }
+    }
+}
+
+#[global_allocator]
+static GLOBAL: CustomAllocator = CustomAllocator;
+
 #[no_mangle]
-pub extern "C" fn init_obdal_env() -> *mut opendal_error {
+pub extern "C" fn init_obdal_env(alloc: *mut c_void, free: *mut c_void) -> *mut opendal_error {
+    let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
+        Some(unsafe { std::mem::transmute(alloc) })
+    } else {
+        None
+    };
+    let free_fn: Option<FreeFn> = if !free.is_null() {
+        Some(unsafe { std::mem::transmute(free) })
+    } else {
+        None
+    };
+
+    if alloc_fn.is_none() || free_fn.is_none() {
+        let err = core::Error::new(core::ErrorKind::ConfigInvalid, "invalid mem func");
+        return opendal_error::new(err);
+    }
+    
+    unsafe {
+        ALLOC_FN = alloc_fn;
+        FREE_FN = free_fn;
+    }
+
     match tracing_subscriber::registry().with(fmt::layer()).try_init() {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => {
