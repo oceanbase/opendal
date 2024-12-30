@@ -155,85 +155,10 @@ impl<A: Access> CompleteAccessor<A> {
     }
 
     async fn complete_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        let capability = self.info.full_capability();
-
-        if path == "/" {
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Forward to inner if create_dir is supported.
-        if path.ends_with('/') && capability.create_dir {
-            let meta = self.inner.stat(path, args).await?.into_metadata();
-
-            if meta.is_file() {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "stat expected a directory, but found a file",
-                ));
-            }
-
-            return Ok(RpStat::new(meta));
-        }
-
-        // Otherwise, we can simulate stat dir via `list`.
-        if path.ends_with('/') && capability.list_with_recursive {
-            let (_, mut l) = self
-                .inner
-                .list(path, OpList::default().with_recursive(true).with_limit(1))
-                .await?;
-
-            return if oio::List::next(&mut l).await?.is_some() {
-                Ok(RpStat::new(Metadata::new(EntryMode::DIR)))
-            } else {
-                Err(Error::new(
-                    ErrorKind::NotFound,
-                    "the directory is not found",
-                ))
-            };
-        }
-
-        // Forward to underlying storage directly since we don't know how to handle stat dir.
         self.inner.stat(path, args).await
     }
 
     fn complete_blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        let capability = self.info.full_capability();
-
-        if path == "/" {
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Forward to inner if create dir is supported.
-        if path.ends_with('/') && capability.create_dir {
-            let meta = self.inner.blocking_stat(path, args)?.into_metadata();
-
-            if meta.is_file() {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "stat expected a directory, but found a file",
-                ));
-            }
-
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Otherwise, we can simulate stat a dir path via `list`.
-        if path.ends_with('/') && capability.list_with_recursive {
-            let (_, mut l) = self
-                .inner
-                .blocking_list(path, OpList::default().with_recursive(true).with_limit(1))?;
-
-            return if oio::BlockingList::next(&mut l)?.is_some() {
-                Ok(RpStat::new(Metadata::new(EntryMode::DIR)))
-            } else {
-                Err(Error::new(
-                    ErrorKind::NotFound,
-                    "the directory is not found",
-                ))
-            };
-        }
-
-        // Forward to underlying storage directly since we don't know how to handle stat dir.
         self.inner.blocking_stat(path, args)
     }
 
