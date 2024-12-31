@@ -125,6 +125,20 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
         )))
     }
 
+    /// Invoke the `put_object_tagging` operation.
+    fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> impl Future<Output = Result<RpPutObjTag>> + MaybeSend {
+        let (_, _) = (path, args);
+
+        ready(Err(Error::new(
+            ErrorKind::Unsupported,
+            "operation is not supported",
+        )))
+    }
+
     /// Invoke the `read` operation on the specified path, returns a
     /// [`Reader`][crate::Reader] if operate successful.
     ///
@@ -292,6 +306,20 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
         ))
     }
 
+    /// Invoke the `blocking_put_object_tagging` operation.
+    fn blocking_put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        let (_, _) = (path, args);
+
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "operation is not supported",
+        ))
+    }
+
     /// Invoke the `blocking_read` operation on the specified path.
     ///
     /// This operation is the blocking version of [`Accessor::read`]
@@ -392,6 +420,12 @@ pub trait AccessDyn: Send + Sync + Debug + Unpin {
     ) -> BoxedFuture<'a, Result<RpCreateDir>>;
     /// Dyn version of [`Accessor::stat`]
     fn stat_dyn<'a>(&'a self, path: &'a str, args: OpStat) -> BoxedFuture<'a, Result<RpStat>>;
+    /// Dyn version of [`Accessor::put_object_tagging`]
+    fn put_object_tagging_dyn<'a>(
+        &'a self,
+        path: &'a str,
+        args: OpPutObjTag
+    ) -> BoxedFuture<'a, Result<RpPutObjTag>>;
     /// Dyn version of [`Accessor::read`]
     fn read_dyn<'a>(
         &'a self,
@@ -436,6 +470,12 @@ pub trait AccessDyn: Send + Sync + Debug + Unpin {
     fn blocking_create_dir_dyn(&self, path: &str, args: OpCreateDir) -> Result<RpCreateDir>;
     /// Dyn version of [`Accessor::blocking_stat`]
     fn blocking_stat_dyn(&self, path: &str, args: OpStat) -> Result<RpStat>;
+    /// Dyn version of [`Accessor::blocking_put_object_tagging`]
+    fn blocking_put_object_tagging_dyn(
+        &self,
+        path: &str,
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag>;
     /// Dyn version of [`Accessor::blocking_read`]
     fn blocking_read_dyn(&self, path: &str, args: OpRead) -> Result<(RpRead, oio::BlockingReader)>;
     /// Dyn version of [`Accessor::blocking_write`]
@@ -481,6 +521,14 @@ where
 
     fn stat_dyn<'a>(&'a self, path: &'a str, args: OpStat) -> BoxedFuture<'a, Result<RpStat>> {
         Box::pin(self.stat(path, args))
+    }
+
+    fn put_object_tagging_dyn<'a>(
+        &'a self,
+        path: &'a str,
+        args: OpPutObjTag,
+    ) -> BoxedFuture<'a, Result<RpPutObjTag>> {
+        Box::pin(self.put_object_tagging(path, args))
     }
 
     fn read_dyn<'a>(
@@ -545,6 +593,14 @@ where
         self.blocking_stat(path, args)
     }
 
+    fn blocking_put_object_tagging_dyn(
+        &self,
+        path: &str,
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.blocking_put_object_tagging(path, args)
+    }
+
     fn blocking_read_dyn(&self, path: &str, args: OpRead) -> Result<(RpRead, oio::BlockingReader)> {
         self.blocking_read(path, args)
     }
@@ -596,6 +652,10 @@ impl Access for dyn AccessDyn {
         self.stat_dyn(path, args).await
     }
 
+    async fn put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        self.put_object_tagging_dyn(path, args).await
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         self.read_dyn(path, args).await
     }
@@ -634,6 +694,10 @@ impl Access for dyn AccessDyn {
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.blocking_stat_dyn(path, args)
+    }
+
+    fn blocking_put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        self.blocking_put_object_tagging_dyn(path, args)
     }
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
@@ -711,6 +775,14 @@ impl<T: Access + ?Sized> Access for Arc<T> {
         async move { self.as_ref().stat(path, args).await }
     }
 
+    fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> impl Future<Output = Result<RpPutObjTag>> + MaybeSend {
+        async move { self.as_ref().put_object_tagging(path, args).await }
+    }
+
     fn read(
         &self,
         path: &str,
@@ -771,6 +843,14 @@ impl<T: Access + ?Sized> Access for Arc<T> {
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.as_ref().blocking_stat(path, args)
+    }
+
+    fn blocking_put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.as_ref().blocking_put_object_tagging(path, args)
     }
 
     fn blocking_read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::BlockingReader)> {

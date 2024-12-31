@@ -1011,6 +1011,23 @@ impl Access for S3Backend {
         }
     }
 
+    async fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        let resp = self.core.s3_put_object_tagging(path, args).await?;
+
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                Ok(RpPutObjTag::default())
+            }
+            _ => Err(parse_error(resp)),
+        }
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         let resp = self.core.s3_get_object(path, args.range(), &args).await?;
 
@@ -1210,5 +1227,24 @@ mod tests {
             let region = S3Builder::detect_region(endpoint, bucket).await;
             assert_eq!(region.as_deref(), expected, "{}", name);
         }
+    }
+
+    #[tokio::test]
+    async fn test_put_object_tagging() {
+        let backend = S3Builder::default()
+            .bucket("xxx")
+            .region("cn-north-1")
+            .endpoint("xxx")
+            .access_key_id("xxx")
+            .secret_access_key("xxx")
+            .build().expect("Failed to build S3 backend");
+
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set);
+        
+        let result = backend.put_object_tagging("tedddddst", op_put_obj_tag).await;
+        assert!(matches!(result, Ok(_)), "Expected Ok but got {:?}", result);
     }
 }

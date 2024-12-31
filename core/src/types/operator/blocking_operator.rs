@@ -248,6 +248,21 @@ impl BlockingOperator {
         ))
     }
 
+    /// TODO 增加注释
+    pub fn put_object_tagging_with(&self, path: &str) -> FunctionPutObjTag {
+        let path = normalize_path(path);
+
+        FunctionPutObjTag(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            OpPutObjTag::default(),
+            |inner, path, args| {
+                let _rp = inner.blocking_put_object_tagging(&path, args)?;
+                Ok(())
+            },
+        ))
+    }
+
     /// Check if this path exists or not.
     ///
     /// # Example

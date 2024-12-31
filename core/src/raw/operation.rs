@@ -45,6 +45,8 @@ pub enum Operation {
     Rename,
     /// Operation for [`crate::raw::Access::stat`]
     Stat,
+    /// Operation for [`crate::raw::Access::put_object_tagging`]
+    PutObjectTagging,
     /// Operation for [`crate::raw::Access::delete`]
     Delete,
     /// Operation for [`crate::raw::oio::Delete::delete`]
@@ -75,6 +77,8 @@ pub enum Operation {
     BlockingRename,
     /// Operation for [`crate::raw::Access::blocking_stat`]
     BlockingStat,
+    /// Operation for [`crate::raw::Access::blocking_put_object_tagging`]
+    BlockingPutObjectTagging,
     /// Operation for [`crate::raw::Access::blocking_delete`]
     BlockingDelete,
     /// Operation for [`crate::raw::oio::BlockingDelete::delete`]
@@ -133,6 +137,7 @@ impl From<Operation> for &'static str {
             Operation::Copy => "copy",
             Operation::Rename => "rename",
             Operation::Stat => "stat",
+            Operation::PutObjectTagging => "put_object_tagging",
             Operation::Delete => "delete",
             Operation::List => "list",
             Operation::ListerNext => "List::next",
@@ -146,6 +151,7 @@ impl From<Operation> for &'static str {
             Operation::BlockingCopy => "blocking_copy",
             Operation::BlockingRename => "blocking_rename",
             Operation::BlockingStat => "blocking_stat",
+            Operation::BlockingPutObjectTagging => "blocking_put_object_tagging",
             Operation::BlockingDelete => "blocking_delete",
             Operation::BlockingList => "blocking_list",
             Operation::BlockingListerNext => "BlockingLister::next",

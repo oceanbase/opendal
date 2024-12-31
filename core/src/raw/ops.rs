@@ -745,3 +745,38 @@ impl OpRename {
         Self::default()
     }
 }
+
+/// Args for `PutObjectTagging` operation.
+#[derive(Debug, Clone, Default)]
+pub struct OpPutObjTag {
+    tag_set: HashMap<String, String>,
+}
+
+impl OpPutObjTag {
+    /// Create a default `OpPutObjTag`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the tag set of the op
+    pub fn with_tag_set(mut self, tag_set: HashMap<String, String>) -> Self {
+        self.tag_set = tag_set;
+        self
+    }
+
+    /// Get the tag set from the op
+    pub fn tag_set(&self) -> &HashMap<String, String> {
+        &self.tag_set
+    }
+}
+
+/// Args for `GetObjectTagging` operation.
+#[derive(Debug, Clone, Default)]
+pub struct OpGetTag {}
+
+impl OpGetTag {
+    /// Create a default `OpGetTag`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}

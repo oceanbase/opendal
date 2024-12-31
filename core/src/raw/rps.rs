@@ -177,6 +177,10 @@ impl RpStat {
     }
 }
 
+/// Reply for `PutObjectTagging` operation.
+#[derive(Debug, Clone, Default)]
+pub struct RpPutObjTag {}
+
 /// Reply for `write` operation.
 #[derive(Debug, Clone, Default)]
 pub struct RpWrite {}

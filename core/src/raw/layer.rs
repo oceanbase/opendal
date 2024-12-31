@@ -198,6 +198,14 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
         self.inner().stat(path, args)
     }
 
+    fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> impl Future<Output = Result<RpPutObjTag>> + MaybeSend {
+        self.inner().put_object_tagging(path, args)
+    }
+
     fn delete(&self) -> impl Future<Output = Result<(RpDelete, Self::Deleter)>> + MaybeSend;
 
     fn list(
@@ -232,6 +240,14 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.inner().blocking_stat(path, args)
+    }
+
+    fn blocking_put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.inner().blocking_put_object_tagging(path, args)
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)>;
@@ -277,6 +293,10 @@ impl<L: LayeredAccess> Access for L {
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         LayeredAccess::stat(self, path, args).await
     }
+    
+    async fn put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        LayeredAccess::put_object_tagging(self, path, args).await
+    }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
         LayeredAccess::delete(self).await
@@ -312,6 +332,10 @@ impl<L: LayeredAccess> Access for L {
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         LayeredAccess::blocking_stat(self, path, args)
+    }
+
+    fn blocking_put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        LayeredAccess::blocking_put_object_tagging(self, path, args)
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {

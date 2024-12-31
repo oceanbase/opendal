@@ -491,6 +491,27 @@ impl S3Core {
         Ok(req)
     }
 
+    pub async fn s3_put_object_tagging(
+        &self,
+        path: &str,
+        args: OpPutObjTag,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+
+        let url = format!("{}/{}?tagging", self.endpoint, percent_encode_path(&p));
+
+        let tagging: Tagging = args.into();
+        let content = quick_xml::se::to_string(&tagging).map_err(new_xml_deserialize_error)?;
+
+        let mut req = Request::put(&url)
+            .body(Buffer::from(Bytes::from(content)))
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+
+        self.send(req).await
+    }
+
     pub async fn s3_head_object(&self, path: &str, args: OpStat) -> Result<Response<Buffer>> {
         let mut req = self.s3_head_object_request(path, args)?;
 
@@ -996,6 +1017,43 @@ pub struct ListObjectVersionsOutputVersion {
     pub etag: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct Tag {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "Value")]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TagSet {
+    #[serde(rename = "Tag")]
+    pub tags: Vec<Tag>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "Tagging", rename_all = "PascalCase")]
+struct Tagging {
+    #[serde(rename = "TagSet")]
+    pub tag_set: TagSet,
+}
+
+impl From<OpPutObjTag> for Tagging {
+    fn from(op: OpPutObjTag) -> Self {
+        let tag_set = TagSet {
+            tags: op
+                .tag_set()
+                .iter()
+                .map(|(k, v)| Tag {
+                    key: k.to_string(),
+                    value: v.to_string(),
+                })
+                .collect(),
+        };
+        Tagging { tag_set }
+    }
+}
+
 pub enum ChecksumAlgorithm {
     Crc32c,
 }
@@ -1022,6 +1080,7 @@ impl Display for ChecksumAlgorithm {
 mod tests {
     use bytes::Buf;
     use bytes::Bytes;
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -1044,6 +1103,58 @@ mod tests {
             out.upload_id,
             "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA"
         )
+    }
+
+    #[test]
+    fn test_serialize_tagging() {
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set);
+        
+        let tagging: Tagging = op_put_obj_tag.into();
+        let actual = quick_xml::se::to_string(&tagging).expect("must succeed");
+
+        pretty_assertions::assert_eq!(
+            actual,
+            r#"<Tagging>
+            <TagSet>
+               <Tag>
+                  <Key>key2</Key>
+                  <Value>value2</Value>
+               </Tag>
+               <Tag>
+                  <Key>key1</Key>
+                  <Value>value1</Value>
+               </Tag>
+            </TagSet>
+         </Tagging>"#
+                // Cleanup space and new line
+                .replace([' ', '\n'], "")
+        )
+    }
+
+    #[test]
+    fn test_deserialize_tagging() {
+        // let bs = Bytes::from(
+        //     r#"<?xml version="1.0" encoding="UTF-8"?>
+        //     <Tagging>
+        //        <TagSet>
+        //           <Tag>
+        //              <Key>string</Key>
+        //              <Value>string</Value>
+        //           </Tag>
+        //           <Tag>
+        //              <Key>string2</Key>
+        //              <Value>string2</Value>
+        //           </Tag>
+        //        </TagSet>
+        //     </Tagging>"#,
+        // );
+
+        // let out: Tagging =
+        //     quick_xml::de::from_reader(bs.reader()).expect("must success");
+        // debug!("{:?}", out.tag_set.tags[0]);
     }
 
     /// This example is from https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#API_CompleteMultipartUpload_Examples

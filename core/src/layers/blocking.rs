@@ -205,6 +205,14 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
         self.inner.stat(path, args).await
     }
 
+    async fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.inner().put_object_tagging(path, args).await
+    }
+
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
         self.inner.delete().await
     }
@@ -248,6 +256,14 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.handle.block_on(self.inner.stat(path, args))
+    }
+
+    fn blocking_put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.handle.block_on(self.inner.put_object_tagging(path, args))
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {

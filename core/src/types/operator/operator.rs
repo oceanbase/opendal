@@ -327,6 +327,24 @@ impl Operator {
         )
     }
 
+    /// TODO 增加注释
+    pub fn put_object_tagging_with(
+        &self,
+        path: &str
+    ) -> FuturePutObjTag<impl Future<Output = Result<()>>> {
+        let path = normalize_path(path);
+
+        OperatorFuture::new(
+            self.inner().clone(),
+            path,
+            OpPutObjTag::default(),
+            |inner, path, args| async move {
+                let _rp = inner.put_object_tagging(&path, args).await?;
+                Ok(())
+            },
+        )
+    }
+
     /// Check if this path exists or not.
     ///
     /// # Example
