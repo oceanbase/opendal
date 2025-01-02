@@ -405,21 +405,30 @@ pub unsafe extern "C" fn opendal_operator_reader(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_operator_reader {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    let reader = match op.deref().reader(path) {
-        Ok(reader) => reader,
-        Err(err) => {
+    if path.is_null() {
+        return opendal_result_operator_reader {
+            reader: std::ptr::null_mut(),
+            error: opendal_error::new(
+                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
+            ),
+        };
+    }
+
+    let c_str = std::ffi::CStr::from_ptr(path);
+    let path = match c_str.to_str() {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
             return opendal_result_operator_reader {
                 reader: std::ptr::null_mut(),
-                error: opendal_error::new(err),
-            }
+                error: opendal_error::new(
+                    core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args")
+                        .set_source(e),
+                ),
+            };
         }
     };
 
-    match reader.into_std_read(..) {
+    match op.deref().reader(path) {
         Ok(reader) => opendal_result_operator_reader {
             reader: Box::into_raw(Box::new(opendal_reader::new(reader))),
             error: std::ptr::null_mut(),

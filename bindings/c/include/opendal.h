@@ -288,7 +288,7 @@ typedef struct opendal_result_read {
  */
 typedef struct opendal_reader {
   /**
-   * The pointer to the opendal::StdReader in the Rust code.
+   * The pointer to the opendal::BlockingReader in the Rust code.
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
@@ -1440,7 +1440,8 @@ void opendal_entry_free(struct opendal_entry *ptr);
  */
 struct opendal_result_reader_read opendal_reader_read(struct opendal_reader *self,
                                                       uint8_t *buf,
-                                                      uintptr_t len);
+                                                      uintptr_t len,
+                                                      uintptr_t offset);
 
 /**
  * \brief Frees the heap memory used by the opendal_reader.

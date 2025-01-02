@@ -23,13 +23,12 @@
 #include <cstdlib>
 
 void *my_alloc(size_t size, size_t align) {
-    printf("my_alloc %zu %zu\n", size, align);
+    // printf("my_alloc %zu %zu\n", size, align);
     return malloc(size);
 }
 
 void my_free(void *ptr) {
-    printf("my_free\n");
-    // Implement your custom free logic here
+    // printf("my_free\n");
     free(ptr);
 }
 
@@ -54,10 +53,10 @@ int main()
     opendal_operator_options_set(options, "disable_config_load", "true");
     opendal_operator_options_set(options, "disable_ec2_metadata", "true");
     opendal_result_operator_new result = opendal_operator_new("s3", options);
-    assert(result.op != NULL);
-    assert(result.error == NULL);
+    assert(result.op != nullptr);
+    assert(result.error == nullptr);
 
-    opendal_operator* op = result.op;
+    opendal_operator *op = result.op;
 
     /* Prepare some data to be written */
     opendal_bytes data = {
@@ -67,22 +66,27 @@ int main()
 
     /* Write this into path "/testpath" */
     error = opendal_operator_write(op, "/testpath", &data);
-    assert(error == NULL);
+    assert(error == nullptr);
 
     /* We can read it out, make sure the data is the same */
-    opendal_result_read r = opendal_operator_read(op, "/testpath");
-    opendal_bytes read_bytes = r.data;
-    assert(r.error == NULL);
-    assert(read_bytes.len == 24);
+    opendal_result_operator_reader result_reader = opendal_operator_reader(op, "/testpath");
+    assert(result_reader.error == nullptr);
+    // The reader is in result.reader
+    opendal_reader *reader = result_reader.reader;
+    assert(reader != nullptr);
+
+    uint8_t buf[100] = { 0 };
+    opendal_result_reader_read result_reader_read = opendal_reader_read(reader, buf, 6, 5);
+    assert(result_reader_read.error == nullptr);
+    assert(result_reader_read.size == 6);
 
     /* Lets print it out */
-    for (int i = 0; i < 24; ++i) {
-        printf("%c", read_bytes.data[i]);
+    printf("=======================================\n");
+    for (int i = 0; i < 6; ++i) {
+        printf("%c", buf[i]);
+        assert(buf[i] == data.data[i + 5]);
     }
-    printf("\n");
-
-    /* the opendal_bytes read is heap allocated, please free it */
-    opendal_bytes_free(&read_bytes);
+    printf("\n=======================================\n");
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);
