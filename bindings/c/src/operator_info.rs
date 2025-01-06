@@ -17,6 +17,7 @@
 
 use std::ffi::CString;
 use std::ffi::{c_char, c_void};
+use tracing::warn;
 
 use ::opendal as core;
 
@@ -172,10 +173,14 @@ impl opendal_operator_info {
     /// \note: The string is on heap, remember to free it
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_scheme(&self) -> *mut c_char {
-        let scheme = self.deref().scheme().to_string();
-        CString::new(scheme)
-            .expect("CString::new failed in opendal_operator_info_get_root")
-            .into_raw()
+        let scheme = self.deref().scheme().into_static();
+        match CString::new(scheme) {
+            Ok(cstring) => cstring.into_raw(),
+            Err(_) => {
+                warn!("fail to convert to CString, scheme: {:?}", scheme);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Return the nul-terminated operator's working root path
@@ -184,9 +189,13 @@ impl opendal_operator_info {
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_root(&self) -> *mut c_char {
         let root = self.deref().root();
-        CString::new(root)
-            .expect("CString::new failed in opendal_operator_info_get_root")
-            .into_raw()
+        match CString::new(root) {
+            Ok(cstring) => cstring.into_raw(),
+            Err(_) => {
+                warn!("fail to convert to CString, root: {:?}", root);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Return the nul-terminated operator backend's name, could be empty if underlying backend has no
@@ -196,9 +205,13 @@ impl opendal_operator_info {
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_name(&self) -> *mut c_char {
         let name = self.deref().name();
-        CString::new(name)
-            .expect("CString::new failed in opendal_operator_info_get_name")
-            .into_raw()
+        match CString::new(name) {
+            Ok(cstring) => cstring.into_raw(),
+            Err(_) => {
+                warn!("fail to convert to CString, name: {:?}", name);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Return the operator's full capability

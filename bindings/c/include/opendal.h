@@ -127,6 +127,7 @@ typedef struct opendal_bytes {
 typedef struct opendal_error {
   enum opendal_code code;
   struct opendal_bytes message;
+  bool is_temporary;
 } opendal_error;
 
 /**

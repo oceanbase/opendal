@@ -96,6 +96,7 @@ impl From<core::ErrorKind> for opendal_code {
 pub struct opendal_error {
     code: opendal_code,
     message: opendal_bytes,
+    is_temporary: bool,
 }
 
 impl opendal_error {
@@ -106,8 +107,9 @@ impl opendal_error {
     pub fn new(err: core::Error) -> *mut opendal_error {
         let code = opendal_code::from(err.kind());
         let message = opendal_bytes::new(Buffer::from(err.to_string()));
+        let is_temporary = err.is_temporary();
 
-        Box::into_raw(Box::new(opendal_error { code, message }))
+        Box::into_raw(Box::new(opendal_error { code, message, is_temporary }))
     }
 
     /// \brief Frees the opendal_error, ok to call on NULL

@@ -17,6 +17,7 @@
 
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
+use tracing::warn;
 
 use ::opendal as core;
 
@@ -57,8 +58,13 @@ impl opendal_entry {
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_path(&self) -> *mut c_char {
         let s = self.deref().path();
-        let c_str = CString::new(s).unwrap();
-        c_str.into_raw()
+        match CString::new(s) {
+            Ok(cstring) => cstring.into_raw(),
+            Err(_) => {
+                warn!("fail to convert to CString, path: {:?}", s);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Name of entry.
@@ -71,8 +77,13 @@ impl opendal_entry {
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_name(&self) -> *mut c_char {
         let s = self.deref().name();
-        let c_str = CString::new(s).unwrap();
-        c_str.into_raw()
+        match CString::new(s) {
+            Ok(cstring) => cstring.into_raw(),
+            Err(_) => {
+                warn!("fail to convert to CString, name: {:?}", s);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Frees the heap memory used by the opendal_list_entry

@@ -91,9 +91,29 @@ pub extern "C" fn init_obdal_env(alloc: *mut c_void, free: *mut c_void) -> *mut 
     match tracing_subscriber::registry().with(fmt::layer()).try_init() {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => {
+            unsafe {
+                ALLOC_FN = None;
+                FREE_FN = None;
+            }
             let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
             opendal_error::new(err)
         }
+    }
+}
+
+fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
+    if path.is_null() {
+        return Err(opendal_error::new(
+            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
+        ));
+    }
+
+    let c_str = unsafe { std::ffi::CStr::from_ptr(path) };
+    match c_str.to_str() {
+        Ok(valid_str) => Ok(valid_str),
+        Err(e) => Err(opendal_error::new(
+            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args").set_source(e),
+        )),
     }
 }
 
@@ -161,8 +181,8 @@ fn build_operator(
         let runtime =
             tokio::runtime::Handle::try_current().unwrap_or_else(|_| RUNTIME.handle().clone());
         let _guard = runtime.enter();
-        op = op
-            .layer(core::layers::BlockingLayer::create().expect("blocking layer must be created"));
+        let blocking_layer = core::layers::BlockingLayer::create()?;
+        op = op.layer(blocking_layer);
     }
     Ok(op)
 }
@@ -209,10 +229,15 @@ pub unsafe extern "C" fn opendal_operator_new(
     scheme: *const c_char,
     options: *const opendal_operator_options,
 ) -> opendal_result_operator_new {
-    assert!(!scheme.is_null());
-    let scheme = std::ffi::CStr::from_ptr(scheme)
-        .to_str()
-        .expect("malformed scheme");
+    let scheme = match c_char_to_str(scheme) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_operator_new {
+                op: std::ptr::null_mut(),
+                error: e,
+            };
+        }
+    };
     let scheme = match core::Scheme::from_str(scheme) {
         Ok(s) => s,
         Err(e) => {
@@ -294,10 +319,13 @@ pub unsafe extern "C" fn opendal_operator_write(
     path: *const c_char,
     bytes: &opendal_bytes,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
+
     match op.deref().write(path, bytes) {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => opendal_error::new(e),
@@ -348,10 +376,16 @@ pub unsafe extern "C" fn opendal_operator_read(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_read {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_read {
+                data: opendal_bytes::empty(),
+                error: e,
+            };
+        }
+    };
+
     match op.deref().read(path) {
         Ok(b) => opendal_result_read {
             data: opendal_bytes::new(b),
@@ -405,25 +439,12 @@ pub unsafe extern "C" fn opendal_operator_reader(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_operator_reader {
-    if path.is_null() {
-        return opendal_result_operator_reader {
-            reader: std::ptr::null_mut(),
-            error: opendal_error::new(
-                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
-            ),
-        };
-    }
-
-    let c_str = std::ffi::CStr::from_ptr(path);
-    let path = match c_str.to_str() {
+    let path = match c_char_to_str(path) {
         Ok(valid_str) => valid_str,
         Err(e) => {
             return opendal_result_operator_reader {
                 reader: std::ptr::null_mut(),
-                error: opendal_error::new(
-                    core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args")
-                        .set_source(e),
-                ),
+                error: e,
             };
         }
     };
@@ -481,10 +502,16 @@ pub unsafe extern "C" fn opendal_operator_writer(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_operator_writer {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_operator_writer {
+                writer: std::ptr::null_mut(),
+                error: e,
+            };
+        }
+    };
+
     let writer = match op.deref().writer(path) {
         Ok(writer) => writer,
         Err(err) => {
@@ -546,10 +573,12 @@ pub unsafe extern "C" fn opendal_operator_delete(
     op: &opendal_operator,
     path: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
     match op.deref().delete(path) {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => opendal_error::new(e),
@@ -599,10 +628,15 @@ pub unsafe extern "C" fn opendal_operator_is_exist(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_is_exist {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_is_exist {
+                is_exist: false,
+                error: e,
+            };
+        }
+    };
     match op.deref().exists(path) {
         Ok(e) => opendal_result_is_exist {
             is_exist: e,
@@ -657,10 +691,15 @@ pub unsafe extern "C" fn opendal_operator_exists(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_exists {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_exists {
+                exists: false,
+                error: e,
+            };
+        }
+    };
     match op.deref().exists(path) {
         Ok(e) => opendal_result_exists {
             exists: e,
@@ -714,10 +753,15 @@ pub unsafe extern "C" fn opendal_operator_stat(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_stat {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_stat {
+                meta: std::ptr::null_mut(),
+                error: e,
+            };
+        }
+    };
     match op.deref().stat(path) {
         Ok(m) => opendal_result_stat {
             meta: Box::into_raw(Box::new(opendal_metadata::new(m))),
@@ -783,10 +827,15 @@ pub unsafe extern "C" fn opendal_operator_list(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_list {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_list {
+                lister: std::ptr::null_mut(),
+                error: e,
+            };
+        }
+    };
     match op.deref().lister(path) {
         Ok(lister) => opendal_result_list {
             lister: Box::into_raw(Box::new(opendal_lister::new(lister))),
@@ -837,10 +886,12 @@ pub unsafe extern "C" fn opendal_operator_create_dir(
     op: &opendal_operator,
     path: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
     if let Err(err) = op.deref().create_dir(path) {
         opendal_error::new(err)
     } else {
@@ -895,14 +946,19 @@ pub unsafe extern "C" fn opendal_operator_rename(
     src: *const c_char,
     dest: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!src.is_null());
-    assert!(!dest.is_null());
-    let src = std::ffi::CStr::from_ptr(src)
-        .to_str()
-        .expect("malformed src");
-    let dest = std::ffi::CStr::from_ptr(dest)
-        .to_str()
-        .expect("malformed dest");
+    let src = match c_char_to_str(src) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
+    let dest = match c_char_to_str(dest) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
+
     if let Err(err) = op.deref().rename(src, dest) {
         opendal_error::new(err)
     } else {
@@ -957,14 +1013,19 @@ pub unsafe extern "C" fn opendal_operator_copy(
     src: *const c_char,
     dest: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!src.is_null());
-    assert!(!dest.is_null());
-    let src = std::ffi::CStr::from_ptr(src)
-        .to_str()
-        .expect("malformed src");
-    let dest = std::ffi::CStr::from_ptr(dest)
-        .to_str()
-        .expect("malformed dest");
+    let src = match c_char_to_str(src) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
+    let dest = match c_char_to_str(dest) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return e;
+        }
+    };
+
     if let Err(err) = op.deref().copy(src, dest) {
         opendal_error::new(err)
     } else {
