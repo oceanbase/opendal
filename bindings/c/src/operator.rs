@@ -101,7 +101,8 @@ pub extern "C" fn init_obdal_env(alloc: *mut c_void, free: *mut c_void) -> *mut 
     }
 }
 
-fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
+/// TODO
+pub fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
     if path.is_null() {
         return Err(opendal_error::new(
             core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
@@ -582,6 +583,61 @@ pub unsafe extern "C" fn opendal_operator_delete(
     match op.deref().delete(path) {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => opendal_error::new(e),
+    }
+}
+
+//TODO
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_put_object_tagging(
+    op: &opendal_operator,
+    path: *const c_char,
+    tagging: &opendal_object_tagging,
+) -> *mut opendal_error {
+    if path.is_null() {
+        return opendal_error::new(
+            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args")
+        )
+    }
+
+    let path = std::ffi::CStr::from_ptr(path)
+        .to_str()
+        .expect("malformed path");
+
+    
+    match op.deref().put_object_tagging_with(path).tag_set(HashMap::from(tagging)).call() {
+        Ok(_) => std::ptr::null_mut(),
+        Err(e) => opendal_error::new(e),
+    }
+}
+
+//TODO
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_get_object_tagging (
+    op: &opendal_operator,
+    path: *const c_char,
+) -> opendal_result_get_object_tagging {
+    if path.is_null() {
+        return opendal_result_get_object_tagging {
+            tagging: opendal_object_tagging::new(),
+            error: opendal_error::new(
+                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid_args")
+            )
+        }
+    }
+
+    let path = std::ffi::CStr::from_ptr(path)
+        .to_str()
+        .expect("malformed path");
+
+    match op.deref().get_object_tagging(path) {
+        Ok(hashmap) => opendal_result_get_object_tagging {
+            tagging: opendal_object_tagging::from_hashmap(hashmap),
+            error: std::ptr::null_mut(),
+        },
+        Err(e) => opendal_result_get_object_tagging {
+            tagging: opendal_object_tagging::new(),
+            error: opendal_error::new(e),
+        }
     }
 }
 

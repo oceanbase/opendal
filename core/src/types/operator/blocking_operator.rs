@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::collections::HashMap;
+
 use super::operator_functions::*;
 use crate::raw::oio::BlockingDelete;
 use crate::raw::*;
@@ -262,6 +264,35 @@ impl BlockingOperator {
             },
         ))
     }
+
+    /// TODO
+    pub fn put_object_tagging(&self, path: &str, tagging: HashMap<String, String>) -> Result<()> {
+        self.put_object_tagging_with(path).tag_set(tagging).call()
+    }
+
+    /// TODO 添加注释
+    pub fn get_object_tagging_with(&self, path: &str) -> FunctionGetObjTag {
+        let path = normalize_path(path);
+
+        FunctionGetObjTag(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            (),
+            |inner, path, args| {
+                let _ = args;
+                let rp = inner.blocking_get_object_tagging(&path)?;
+                let tag_set = rp.tag_set();
+                Ok(tag_set)
+            }
+        ))
+    }
+
+    /// TODO 
+    pub fn get_object_tagging(&self, path: &str) -> Result<HashMap<String, String>> {
+        self.get_object_tagging_with(path).call()
+    }
+
+    // pub fn get_object_tagging(&self, path: &str) -> 
 
     /// Check if this path exists or not.
     ///

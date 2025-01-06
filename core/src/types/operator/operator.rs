@@ -17,6 +17,7 @@
 
 use std::future::Future;
 use std::time::Duration;
+use std::collections::HashMap;
 
 use futures::Stream;
 use futures::StreamExt;
@@ -342,6 +343,26 @@ impl Operator {
                 let _rp = inner.put_object_tagging(&path, args).await?;
                 Ok(())
             },
+        )
+    }
+
+    /// TODO 增加注释
+    pub fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> FutureGetObjTag<impl Future<Output = Result<HashMap<String, String>>>> {
+        let path = normalize_path(path);
+
+        OperatorFuture::new(
+            self.inner().clone(),
+            path,
+            (),
+            |inner, path, args| async move {
+                let _ = args;
+                let rp = inner.get_object_tagging(&path).await?;
+                let tag_set = rp.tag_set();
+                Ok(tag_set)
+            }
         )
     }
 

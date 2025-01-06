@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use bytes::Buf;
 use constants::X_AMZ_META_PREFIX;
 use http::Response;
 use http::StatusCode;
@@ -1028,6 +1029,25 @@ impl Access for S3Backend {
         }
     }
 
+    async fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        let resp = self.core.s3_get_object_tagging(path).await?;
+        
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                let body = resp.body();
+                let tagging: Tagging = quick_xml::de::from_reader(body.clone().reader()).map_err(new_xml_deserialize_error)?;
+                
+                Ok(tagging.into())
+            }
+            _ => Err(parse_error(resp))
+        }
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         let resp = self.core.s3_get_object(path, args.range(), &args).await?;
 
@@ -1125,6 +1145,8 @@ impl Access for S3Backend {
 
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use super::*;
 
     #[test]
@@ -1246,5 +1268,33 @@ mod tests {
         
         let result = backend.put_object_tagging("tedddddst", op_put_obj_tag).await;
         assert!(matches!(result, Ok(_)), "Expected Ok but got {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_get_object_tagging() {
+        let backend = S3Builder::default()
+            .bucket("xxx")
+            .region("cn-north-1")
+            .endpoint("xxx")
+            .access_key_id("xxx")
+            .secret_access_key("xxx")
+            .enable_virtual_host_style()
+            .build().expect("Failed to build S3 backend");
+
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set.clone());
+
+        let result = backend.put_object_tagging("test.txt", op_put_obj_tag).await;
+        assert!(matches!(result, Ok(_)), "Expected Ok but got {:?}", result);
+
+        let result = backend.get_object_tagging("test2.txt").await;
+        
+        if let Ok(rp) = result {
+            pretty_assertions::assert_eq!(rp.tag_set(), tag_set);
+        } else if let Err(err) = result {
+            panic!("{}", err);
+        }
     }
 }

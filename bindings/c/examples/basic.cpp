@@ -123,6 +123,67 @@ void test_rw(const opendal_operator *op)
     std::cout << "======================================= Finish test_rw =======================================" << std::endl;
 }
 
+void test_tagging(const opendal_operator *op) 
+{
+    std::cout << "======================================= Begin test_tagging =======================================" << std::endl;
+    assert(op != nullptr);
+    opendal_bytes data = {
+        .data = (uint8_t*)"this_string_length_is_24",
+        .len = 24,
+    };
+    /* Write this into path "/testpath" */
+    opendal_error *error = opendal_operator_write(op, "/testpath", &data);
+    assert(error == nullptr);
+
+    // test when tagging is not exist
+    {
+        opendal_result_get_object_tagging result = opendal_operator_get_object_tagging(op, "/testpath");
+        assert(result.error == nullptr);
+        assert(result.tagging != nullptr);
+
+        opendal_result_object_tagging_get result2 = opendal_object_tagging_get(result.tagging, "key");
+        assert(result2.error == nullptr);
+        assert(result2.value.len == 0);
+
+        opendal_object_tagging_free(result.tagging);
+        opendal_bytes_free(&result2.value);
+    }
+
+    // test put_object_tagging
+    {
+        opendal_object_tagging *tagging = opendal_object_tagging_new();
+        assert(tagging != nullptr);
+        opendal_object_tagging_set(tagging, "key", "value");
+        opendal_object_tagging_set(tagging, "key2", "value2");
+        opendal_error *error = opendal_operator_put_object_tagging(op, "/testpath", tagging);
+        assert(error == nullptr);
+        
+        opendal_object_tagging_free(tagging);
+    }
+
+    // test get_object_tagging
+    {
+        opendal_result_get_object_tagging result = opendal_operator_get_object_tagging(op, "/testpath");
+        assert(result.error == nullptr);
+        assert(result.tagging != nullptr);
+        // 
+
+        opendal_result_object_tagging_get result2 = opendal_object_tagging_get(result.tagging, "key");
+        assert(result2.error == nullptr);
+        assert(std::strcmp((char *)result2.value.data, "value") == 0);
+
+        opendal_result_object_tagging_get result3 = opendal_object_tagging_get(result.tagging, "key2");
+        assert(result3.error == nullptr);
+        assert(std::strcmp((char *)result3.value.data, "value2") == 0);
+
+        opendal_bytes_free(&result2.value);
+        opendal_bytes_free(&result3.value);
+        opendal_object_tagging_free(result.tagging);
+    }
+    
+    std::cout << "======================================= Finish test_tagging =======================================" << std::endl;
+}
+
 int main()
 {
     opendal_error *error = init_obdal_env(nullptr, nullptr);
@@ -138,6 +199,7 @@ int main()
 
     test_multipart(op);
     test_rw(op);
+    test_tagging(op);
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);

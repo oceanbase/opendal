@@ -11,3 +11,5 @@ examples/*
 !examples/*.c
 !examples/*.cc
 !examples/*.cpp
+
+compile_commands.json

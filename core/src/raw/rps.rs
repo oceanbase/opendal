@@ -16,6 +16,7 @@
 // under the License.
 
 use http::Request;
+use std::collections::HashMap;
 
 use crate::raw::*;
 use crate::*;
@@ -180,6 +181,31 @@ impl RpStat {
 /// Reply for `PutObjectTagging` operation.
 #[derive(Debug, Clone, Default)]
 pub struct RpPutObjTag {}
+
+/// Reply for `GetObjectTagging` operator.
+#[derive(Debug, Clone, Default)]
+pub struct RpGetObjTag {
+    tag_set: HashMap<String, String>,
+}
+
+
+impl RpGetObjTag {
+    /// Create a default `OpGetTag`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the tag set of the op
+    pub fn with_tag_set(mut self, tag_set: HashMap<String, String>) -> Self {
+        self.tag_set = tag_set;
+        self
+    }
+
+    /// Get the tag set of the op
+    pub fn tag_set(self) -> HashMap<String, String> {
+        self.tag_set
+    }
+}
 
 /// Reply for `write` operation.
 #[derive(Debug, Clone, Default)]

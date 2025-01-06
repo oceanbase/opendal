@@ -342,6 +342,27 @@ typedef struct opendal_result_operator_writer {
 } opendal_result_operator_writer;
 
 /**
+ * TODO
+ */
+typedef struct opendal_object_tagging {
+  void *inner;
+} opendal_object_tagging;
+
+/**
+ *TODO
+ */
+typedef struct opendal_result_get_object_tagging {
+  /**
+   * TODO
+   */
+  struct opendal_object_tagging *tagging;
+  /**
+   * TODO
+   */
+  struct opendal_error *error;
+} opendal_result_get_object_tagging;
+
+/**
  * \brief The result type returned by opendal_operator_is_exist().
  *
  * The result type for opendal_operator_is_exist(), the field `is_exist`
@@ -581,6 +602,20 @@ typedef struct opendal_capability {
    */
   bool blocking;
 } opendal_capability;
+
+/**
+ *TODO
+ */
+typedef struct opendal_result_object_tagging_get {
+  /**
+   * TODO
+   */
+  struct opendal_bytes value;
+  /**
+   * TODO
+   */
+  struct opendal_error *error;
+} opendal_result_object_tagging_get;
 
 typedef struct ObSpan {
   void *span;
@@ -996,6 +1031,13 @@ struct opendal_result_operator_writer opendal_operator_writer(const struct opend
  */
 struct opendal_error *opendal_operator_delete(const struct opendal_operator *op, const char *path);
 
+struct opendal_error *opendal_operator_put_object_tagging(const struct opendal_operator *op,
+                                                          const char *path,
+                                                          const struct opendal_object_tagging *tagging);
+
+struct opendal_result_get_object_tagging opendal_operator_get_object_tagging(const struct opendal_operator *op,
+                                                                             const char *path);
+
 /**
  * \brief Check whether the path exists.
  *
@@ -1368,6 +1410,29 @@ struct opendal_capability opendal_operator_info_get_native_capability(const stru
  * \brief Frees the heap memory used by the opendal_bytes
  */
 void opendal_bytes_free(struct opendal_bytes *ptr);
+
+/**
+ *TODO
+ */
+struct opendal_object_tagging *opendal_object_tagging_new(void);
+
+/**
+ *TODO
+ */
+void opendal_object_tagging_set(struct opendal_object_tagging *self,
+                                const char *key,
+                                const char *value);
+
+/**
+ *TODO
+ */
+struct opendal_result_object_tagging_get opendal_object_tagging_get(struct opendal_object_tagging *self,
+                                                                    const char *key);
+
+/**
+ *TODO
+ */
+void opendal_object_tagging_free(struct opendal_object_tagging *ptr);
 
 /**
  * \brief Construct a heap-allocated opendal_operator_options

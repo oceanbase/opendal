@@ -54,6 +54,24 @@ pub struct opendal_result_read {
     pub error: *mut opendal_error,
 }
 
+///TODO
+#[repr(C)]
+pub struct opendal_result_get_object_tagging {
+    /// TODO
+    pub tagging: *mut opendal_object_tagging,
+    /// TODO
+    pub error: *mut opendal_error,
+}
+
+///TODO
+#[repr(C)]
+pub struct opendal_result_object_tagging_get {
+    /// TODO
+    pub value: opendal_bytes,
+    /// TODO
+    pub error: *mut opendal_error,
+}
+
 /// \brief The result type returned by opendal_operator_is_exist().
 ///
 /// The result type for opendal_operator_is_exist(), the field `is_exist`

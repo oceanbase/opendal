@@ -21,4 +21,9 @@ perf.*
 # Python cache files
 **/__pycache__/
 
-rpm/deps/
+rpm/**
+!rpm/obdal-build.sh
+!rpm/obdal.spec
+
+
+**/.ccls-cache/**

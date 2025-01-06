@@ -769,14 +769,3 @@ impl OpPutObjTag {
         &self.tag_set
     }
 }
-
-/// Args for `GetObjectTagging` operation.
-#[derive(Debug, Clone, Default)]
-pub struct OpGetTag {}
-
-impl OpGetTag {
-    /// Create a default `OpGetTag`.
-    pub fn new() -> Self {
-        Self::default()
-    }
-}

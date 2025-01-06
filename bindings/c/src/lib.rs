@@ -42,6 +42,7 @@ pub use metadata::opendal_metadata;
 
 mod operator;
 pub use operator::opendal_operator;
+pub use operator::c_char_to_str;
 
 mod operator_info;
 
@@ -57,10 +58,13 @@ pub use result::opendal_result_read;
 pub use result::opendal_result_reader_read;
 pub use result::opendal_result_stat;
 pub use result::opendal_result_writer_write;
+pub use result::opendal_result_get_object_tagging;
+pub use result::opendal_result_object_tagging_get;
 
 mod types;
 pub use types::opendal_bytes;
 pub use types::opendal_operator_options;
+pub use types::opendal_object_tagging;
 
 mod entry;
 pub use entry::opendal_entry;

@@ -14,13 +14,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 use std::collections::HashMap;
-use std::ffi::c_void;
-use std::os::raw::c_char;
 use std::ffi::CStr;
-use tracing::{span, Level, span::EnteredSpan};
+use std::ffi::{c_char, c_void};
+use tracing::{span, span::EnteredSpan, Level};
 
+use super::*;
 use opendal::Buffer;
 
 /// \brief opendal_bytes carries raw-bytes with its length
@@ -87,6 +86,105 @@ impl From<&opendal_bytes> for Buffer {
     fn from(v: &opendal_bytes) -> Self {
         let slice = unsafe { std::slice::from_raw_parts(v.data, v.len) };
         Buffer::from(bytes::Bytes::copy_from_slice(slice))
+    }
+}
+
+/// TODO
+#[repr(C)]
+pub struct opendal_object_tagging {
+    inner: *mut c_void,
+}
+
+impl opendal_object_tagging {
+    pub(crate) fn deref(&self) -> &HashMap<String, String> {
+        unsafe { &*(self.inner as *mut HashMap<String, String>) }
+    }
+    pub(crate) fn deref_mut(&mut self) -> &mut HashMap<String, String> {
+        unsafe { &mut *(self.inner as *mut HashMap<String, String>) }
+    }
+}
+
+impl opendal_object_tagging {
+
+    pub(crate) fn new() -> *mut Self {
+        let map: HashMap<String, String> = HashMap::default();
+        let tagging = opendal_object_tagging {
+            inner: Box::into_raw(Box::new(map)) as _,
+        };
+        Box::into_raw(Box::new(tagging))
+    }
+
+    ///TODO
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_object_tagging_new() -> *mut Self {
+        Self::new()
+    }
+
+    ///TODO
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_object_tagging_set(
+        &mut self,
+        key: *const c_char,
+        value: *const c_char,
+    ) {
+        let k = unsafe { std::ffi::CStr::from_ptr(key) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        let v = unsafe { std::ffi::CStr::from_ptr(value) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        self.deref_mut().insert(k, v);
+    }
+
+    ///TODO
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_object_tagging_get(
+        &mut self,
+        key: *const c_char,
+    ) -> opendal_result_object_tagging_get {
+        let key = match c_char_to_str(key) {
+            Ok(valid_key) => valid_key,
+            Err(e) => {
+                return opendal_result_object_tagging_get {
+                    value: opendal_bytes::empty(),
+                    error: e,
+                };
+            }
+        };
+
+        if let Some(val) = self.deref().get(key) {
+            return opendal_result_object_tagging_get {
+                value: opendal_bytes::new(Buffer::from(val.clone().into_bytes())),
+                error: std::ptr::null_mut(),
+            };
+        }
+        opendal_result_object_tagging_get {
+            value: opendal_bytes::empty(),
+            error: std::ptr::null_mut(),
+        }
+    }
+    ///TODO
+    pub fn from_hashmap(hashmap: HashMap<String, String>) -> *mut Self {
+        let tagging = opendal_object_tagging {
+            inner: Box::into_raw(Box::new(hashmap)) as _,
+        };
+        Box::into_raw(Box::new(tagging))
+    }
+    ///TODO
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_object_tagging_free(ptr: *mut opendal_object_tagging) {
+        if !ptr.is_null() {
+            drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
+            drop(Box::from_raw(ptr));
+        }
+    }
+}
+
+impl From<&opendal_object_tagging> for HashMap<String, String> {
+    fn from(tagging: &opendal_object_tagging) -> Self {
+        tagging.deref().clone()
     }
 }
 
