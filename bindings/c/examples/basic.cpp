@@ -21,6 +21,8 @@
 #include "opendal.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <iostream>
 
 void *my_alloc(size_t size, size_t align) {
     // printf("my_alloc %zu %zu\n", size, align);
@@ -32,17 +34,8 @@ void my_free(void *ptr) {
     free(ptr);
 }
 
-int main()
+opendal_operator *init_operator()
 {
-    opendal_error *error = init_obdal_env(nullptr, nullptr);
-    assert(error != nullptr);
-    printf("%s\n", error->message.data);
-
-    error = init_obdal_env(reinterpret_cast<void *>(my_alloc), reinterpret_cast<void *>(my_free));
-    assert(error == nullptr);
-    ObSpan *ob_span = ob_new_span(1, "test-trace");
-    assert(ob_span != nullptr);
-    
     /* Initialize a operator for "memory" backend, with no options */
     opendal_operator_options *options = opendal_operator_options_new();
     opendal_operator_options_set(options, "bucket", "xxx");
@@ -56,16 +49,56 @@ int main()
     assert(result.op != nullptr);
     assert(result.error == nullptr);
 
-    opendal_operator *op = result.op;
+    opendal_operator_options_free(options);
+    return result.op;
+}
 
-    /* Prepare some data to be written */
+void test_multipart(const opendal_operator *op)
+{
+    std::cout << "======================================= Begin test_multipart =======================================" << std::endl;
+    assert(op != nullptr);
+    const char *path = "testpath";
+    opendal_result_operator_writer r_writer = opendal_operator_writer(op, path);
+    assert(r_writer.error == nullptr);
+    assert(r_writer.writer != nullptr);
+    opendal_writer *writer = r_writer.writer;
+    
+    const int64_t data_size = 10 * 1024 * 1024LL;   // 10MB
+    uint8_t *data_str = static_cast<uint8_t *>(malloc(data_size));
+    assert(data_str != nullptr);
+    memset(data_str, 'a', data_size);
+
+    opendal_bytes data = {
+        .data = data_str,
+        .len = data_size,
+    };
+    opendal_result_writer_write r_writer_write = opendal_writer_write(writer, &data);
+    assert(r_writer_write.error == nullptr);
+    r_writer_write = opendal_writer_write(writer, &data);
+    assert(r_writer_write.error == nullptr);
+    
+    // abort
+    assert(nullptr == opendal_writer_abort(writer));
+    
+    // should fail
+    r_writer_write = opendal_writer_write(writer, &data);
+    assert(r_writer_write.error != nullptr);
+    std::cout << r_writer_write.error->code << std::endl;
+    std::cout << (const char *)(r_writer_write.error->message.data) << std::endl;
+    std::cout << "======================================= Finish test_multipart =======================================" << std::endl;
+}
+
+void test_rw(const opendal_operator *op)
+{
+    std::cout << "======================================= Begin test_rw =======================================" << std::endl;
+    assert(op != nullptr);
     opendal_bytes data = {
         .data = (uint8_t*)"this_string_length_is_24",
         .len = 24,
     };
 
     /* Write this into path "/testpath" */
-    error = opendal_operator_write(op, "/testpath", &data);
+    opendal_error *error = opendal_operator_write(op, "/testpath", &data);
     assert(error == nullptr);
 
     /* We can read it out, make sure the data is the same */
@@ -81,12 +114,30 @@ int main()
     assert(result_reader_read.size == 6);
 
     /* Lets print it out */
-    printf("=======================================\n");
+    printf("read result:");
     for (int i = 0; i < 6; ++i) {
         printf("%c", buf[i]);
         assert(buf[i] == data.data[i + 5]);
     }
-    printf("\n=======================================\n");
+    printf("\n");
+    std::cout << "======================================= Finish test_rw =======================================" << std::endl;
+}
+
+int main()
+{
+    opendal_error *error = init_obdal_env(nullptr, nullptr);
+    assert(error != nullptr);
+    printf("%s\n", error->message.data);
+
+    error = init_obdal_env(reinterpret_cast<void *>(my_alloc), reinterpret_cast<void *>(my_free));
+    assert(error == nullptr);
+    ObSpan *ob_span = ob_new_span(1, "test-trace");
+    assert(ob_span != nullptr);
+
+    opendal_operator *op = init_operator();
+
+    test_multipart(op);
+    test_rw(op);
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);

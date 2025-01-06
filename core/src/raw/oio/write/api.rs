@@ -115,6 +115,14 @@ pub trait BlockingWrite: Send + Sync + 'static {
 
     /// Close the writer and make sure all data has been flushed.
     fn close(&mut self) -> Result<()>;
+
+    /// Abort the pending writer.
+    fn abort(&mut self) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "output writer doesn't support abort",
+        ))
+    }
 }
 
 impl BlockingWrite for () {

@@ -56,7 +56,7 @@ impl opendal_reader {
         len: usize,
         offset: usize,
     ) -> opendal_result_reader_read {
-        if buf.is_null() || len == 0 || offset == 0 {
+        if buf.is_null() || len == 0 {
             return opendal_result_reader_read {
                 size: 0,
                 error: opendal_error::new(

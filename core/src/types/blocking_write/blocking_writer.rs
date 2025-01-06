@@ -87,6 +87,11 @@ impl BlockingWriter {
         self.inner.close()
     }
 
+    /// Abort the pending writer.
+    pub fn abort(&mut self) -> Result<()> {
+        self.inner.abort()
+    }
+
     /// Convert writer into [`StdWriter`] which implements [`std::io::Write`],
     pub fn into_std_write(self) -> StdWriter {
         StdWriter::new(self.inner)

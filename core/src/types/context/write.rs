@@ -283,6 +283,12 @@ impl WriteGenerator<oio::BlockingWriter> {
 
         self.w.close()
     }
+
+    /// Abort the write process.
+     pub fn abort(&mut self) -> Result<()> {
+        self.buffer.clear();
+        self.w.abort()
+    }
 }
 
 #[cfg(test)]

@@ -308,6 +308,10 @@ impl<I: oio::Write + 'static> oio::BlockingWrite for BlockingWrapper<I> {
     fn close(&mut self) -> Result<()> {
         self.handle.block_on(self.inner.close())
     }
+
+    fn abort(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.abort())
+    }
 }
 
 impl<I: oio::List> oio::BlockingList for BlockingWrapper<I> {

@@ -77,4 +77,13 @@ impl opendal_writer {
             drop(Box::from_raw(ptr));
         }
     }
+
+    /// Abort the pending writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_writer_abort(&mut self) -> *mut opendal_error {
+        match self.deref_mut().abort() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    }
 }

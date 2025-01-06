@@ -1460,6 +1460,11 @@ struct opendal_result_writer_write opendal_writer_write(struct opendal_writer *s
  */
 void opendal_writer_free(struct opendal_writer *ptr);
 
+/**
+ * Abort the pending writer.
+ */
+struct opendal_error *opendal_writer_abort(struct opendal_writer *self);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus
