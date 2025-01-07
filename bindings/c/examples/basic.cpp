@@ -184,6 +184,94 @@ void test_tagging(const opendal_operator *op)
     std::cout << "======================================= Finish test_tagging =======================================" << std::endl;
 }
 
+void test_list(const opendal_operator *op)
+{
+    std::cout << "======================================= Begin test_list =======================================" << std::endl;
+    assert(op != nullptr);
+    opendal_bytes data = {
+        .data = (uint8_t*)"this_string_length_is_24",
+        .len = 24,
+    };
+            
+    opendal_error *error = opendal_operator_write(op, "testpath/a", &data);
+    assert(error == nullptr);
+    error = opendal_operator_write(op, "testpath/b", &data);
+    assert(error == nullptr);
+    error = opendal_operator_write(op, "testpath/c/d", &data);
+    assert(error == nullptr);
+
+    {
+        // recursive = true
+        opendal_result_list l = opendal_operator_list(op, "testpath/", 1000, true/*recursive*/, "testpath/a");
+        assert(l.error == nullptr);
+        assert(l.lister != nullptr);
+        opendal_lister *lister = l.lister;
+
+        opendal_entry *entry = nullptr;
+
+        // first should be testpath/b
+        opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert((entry = r_lister_next.entry) != nullptr);
+        assert(0 == strcmp("testpath/b", opendal_entry_path(entry)));
+        // check file length
+        opendal_metadata *meta = opendal_entry_metadata(entry);
+        assert(meta != nullptr);
+        assert(data.len == opendal_metadata_content_length(meta));
+        opendal_metadata_free(meta);
+        opendal_entry_free(entry);
+        entry = nullptr;
+
+        // second should be testpath/c/d
+        r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert((entry = r_lister_next.entry) != nullptr);
+        assert(0 == strcmp("testpath/c/d", opendal_entry_path(entry)));
+        opendal_entry_free(entry);
+        entry = nullptr;
+
+        // end
+        r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert(r_lister_next.entry == nullptr);
+        opendal_lister_free(lister);
+    }
+
+    {
+        // recursive = false
+        opendal_result_list l = opendal_operator_list(op, "testpath/", 1000, false/*recursive*/, "testpath/a");
+        assert(l.error == nullptr);
+        assert(l.lister != nullptr);
+        opendal_lister *lister = l.lister;
+
+        opendal_entry *entry = nullptr;
+
+        // first should be testpath/c/, because common prefix is handled first
+        opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert((entry = r_lister_next.entry) != nullptr);
+        assert(0 == strcmp("testpath/c/", opendal_entry_path(entry)));
+        opendal_entry_free(entry);
+        entry = nullptr;
+
+        // second should be testpath/b
+        r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert((entry = r_lister_next.entry) != nullptr);
+        assert(0 == strcmp("testpath/b", opendal_entry_path(entry)));
+        opendal_entry_free(entry);
+        entry = nullptr;
+
+        // end
+        r_lister_next = opendal_lister_next(lister);
+        assert(r_lister_next.error == nullptr);
+        assert(r_lister_next.entry == nullptr);
+        opendal_lister_free(lister);
+    }
+
+    std::cout << "======================================= Finish test_list =======================================" << std::endl;
+}
+
 int main()
 {
     opendal_error *error = init_obdal_env(nullptr, nullptr);
@@ -200,6 +288,7 @@ int main()
     test_multipart(op);
     test_rw(op);
     test_tagging(op);
+    test_list(op);
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);

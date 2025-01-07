@@ -20,6 +20,7 @@ use std::os::raw::c_char;
 use tracing::warn;
 
 use ::opendal as core;
+use crate::opendal_metadata;
 
 /// \brief opendal_list_entry is the entry under a path, which is listed from the opendal_lister
 ///
@@ -84,6 +85,12 @@ impl opendal_entry {
                 std::ptr::null_mut()
             }
         }
+    }
+
+    /// TODO optimize mem allocation
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_entry_metadata(&self) -> *mut opendal_metadata {
+        Box::into_raw(Box::new(opendal_metadata::new(self.deref().metadata().clone())))
     }
 
     /// \brief Frees the heap memory used by the opendal_list_entry

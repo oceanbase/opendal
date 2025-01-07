@@ -1215,7 +1215,10 @@ struct opendal_result_stat opendal_operator_stat(const struct opendal_operator *
  * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_list opendal_operator_list(const struct opendal_operator *op,
-                                                 const char *path);
+                                                 const char *path,
+                                                 uintptr_t limit,
+                                                 bool recursive,
+                                                 const char *start_after);
 
 /**
  * \brief Blocking create the directory in `path`.
@@ -1495,6 +1498,11 @@ char *opendal_entry_path(const struct opendal_entry *self);
  * \note To free the string, you can directly call free()
  */
 char *opendal_entry_name(const struct opendal_entry *self);
+
+/**
+ * TODO optimize mem allocation
+ */
+struct opendal_metadata *opendal_entry_metadata(const struct opendal_entry *self);
 
 /**
  * \brief Frees the heap memory used by the opendal_list_entry

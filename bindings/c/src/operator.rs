@@ -882,7 +882,19 @@ pub unsafe extern "C" fn opendal_operator_stat(
 pub unsafe extern "C" fn opendal_operator_list(
     op: &opendal_operator,
     path: *const c_char,
+    limit: usize,
+    recursive: bool,
+    start_after: *const c_char,
 ) -> opendal_result_list {
+    if limit == 0 {
+        return opendal_result_list {
+            lister: std::ptr::null_mut(),
+            error: opendal_error::new(
+                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
+            ),
+        };
+    }
+
     let path = match c_char_to_str(path) {
         Ok(valid_str) => valid_str,
         Err(e) => {
@@ -892,7 +904,28 @@ pub unsafe extern "C" fn opendal_operator_list(
             };
         }
     };
-    match op.deref().lister(path) {
+
+    let start_after = if start_after.is_null() {
+        ""
+    } else {
+        match c_char_to_str(start_after) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_list {
+                    lister: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        }
+    };
+
+    match op.deref()
+        .lister_with(path)
+        .limit(limit)
+        .recursive(recursive)
+        .start_after(start_after)
+        .call()
+    {
         Ok(lister) => opendal_result_list {
             lister: Box::into_raw(Box::new(opendal_lister::new(lister))),
             error: std::ptr::null_mut(),
