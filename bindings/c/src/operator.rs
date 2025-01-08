@@ -66,7 +66,7 @@ unsafe impl GlobalAlloc for CustomAllocator {
 static GLOBAL: CustomAllocator = CustomAllocator;
 
 #[no_mangle]
-pub extern "C" fn init_obdal_env(alloc: *mut c_void, free: *mut c_void) -> *mut opendal_error {
+pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mut opendal_error {
     let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
         Some(unsafe { std::mem::transmute(alloc) })
     } else {

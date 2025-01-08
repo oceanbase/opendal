@@ -274,11 +274,11 @@ void test_list(const opendal_operator *op)
 
 int main()
 {
-    opendal_error *error = init_obdal_env(nullptr, nullptr);
+    opendal_error *error = opendal_init_env(nullptr, nullptr);
     assert(error != nullptr);
     printf("%s\n", error->message.data);
 
-    error = init_obdal_env(reinterpret_cast<void *>(my_alloc), reinterpret_cast<void *>(my_free));
+    error = opendal_init_env(reinterpret_cast<void *>(my_alloc), reinterpret_cast<void *>(my_free));
     assert(error == nullptr);
     ObSpan *ob_span = ob_new_span(1, "test-trace");
     assert(ob_span != nullptr);
