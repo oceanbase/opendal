@@ -105,7 +105,6 @@ impl opendal_object_tagging {
 }
 
 impl opendal_object_tagging {
-
     pub(crate) fn new() -> *mut Self {
         let map: HashMap<String, String> = HashMap::default();
         let tagging = opendal_object_tagging {
@@ -284,7 +283,13 @@ pub struct ObSpan {
 
 impl ObSpan {
     fn new(tenant_id: u64, trace_id: &str) -> Self {
-        let span = span!(Level::INFO, "", tenant_id = tenant_id, trace_id = trace_id).entered();
+        let span = span!(
+            Level::INFO,
+            "",
+            tenant_id = tenant_id,
+            trace_id = trace_id,
+        )
+        .entered();
         let option_span = Some(span);
         let span_ptr = Box::into_raw(Box::new(option_span)) as *mut c_void;
         ObSpan { span: span_ptr }

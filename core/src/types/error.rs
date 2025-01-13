@@ -86,6 +86,13 @@ pub enum ErrorKind {
     ///
     /// OpenDAL returns this error to indicate that the range of the read request is not satisfied.
     RangeNotSatisfied,
+    /// The region name or The bucket name is invalid.
+    InvalidObjectStorageEndpoint,
+    /// This error is retured when the uploaded checksum does not match the checksum 
+    /// calculated from the data accepted by the server.
+    ChecksumError,
+    /// OpenDal returns this error to indicate that the region is not correct.
+    RegionMismatch,
 }
 
 impl ErrorKind {
@@ -116,6 +123,9 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::IsSameFile => "IsSameFile",
             ErrorKind::ConditionNotMatch => "ConditionNotMatch",
             ErrorKind::RangeNotSatisfied => "RangeNotSatisfied",
+            ErrorKind::InvalidObjectStorageEndpoint => "InvalidObjectStorageEndpoint",
+            ErrorKind::ChecksumError => "ChecksumError",
+            ErrorKind::RegionMismatch => "RegionMismatch",
         }
     }
 }

@@ -67,23 +67,31 @@ impl opendal_writer {
         }
     }
 
-    /// \brief Frees the heap memory used by the opendal_writer.
-    /// \note This function make sure all data have been stored.
-    #[no_mangle]
-    pub unsafe extern "C" fn opendal_writer_free(ptr: *mut opendal_writer) {
-        if !ptr.is_null() {
-            let _ = (*ptr).deref_mut().close();
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingWriter));
-            drop(Box::from_raw(ptr));
-        }
-    }
-
     /// Abort the pending writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_writer_abort(&mut self) -> *mut opendal_error {
         match self.deref_mut().abort() {
             Ok(_) => std::ptr::null_mut(),
             Err(e) => opendal_error::new(e),
+        }
+    }
+
+    /// \brief close the writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_writer_close(&mut self) -> *mut opendal_error {
+        match self.deref_mut().close() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    }
+
+    /// \brief Frees the heap memory used by the opendal_writer.
+    /// \note This function make sure all data have been stored.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_writer_free(ptr: *mut opendal_writer) {
+        if !ptr.is_null() {
+            drop(Box::from_raw((*ptr).inner as *mut core::BlockingWriter));
+            drop(Box::from_raw(ptr));
         }
     }
 }

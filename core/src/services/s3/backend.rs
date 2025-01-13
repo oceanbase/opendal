@@ -776,7 +776,7 @@ impl Builder for S3Builder {
 
         if cfg.region.is_none() {
             return Err(Error::new(
-                ErrorKind::ConfigInvalid,
+                ErrorKind::RegionMismatch,
                 "region is missing. Please find it by S3::detect_region() or set them in env.",
             )
             .with_operation("Builder::build")

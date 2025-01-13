@@ -45,6 +45,7 @@ opendal_operator *init_operator()
     opendal_operator_options_set(options, "secret_access_key", "xxx");
     opendal_operator_options_set(options, "disable_config_load", "true");
     opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+    opendal_operator_options_set(options, "enable_virtual_host_style", "true");
     opendal_result_operator_new result = opendal_operator_new("s3", options);
     assert(result.op != nullptr);
     assert(result.error == nullptr);
@@ -62,7 +63,7 @@ void test_multipart(const opendal_operator *op)
     assert(r_writer.error == nullptr);
     assert(r_writer.writer != nullptr);
     opendal_writer *writer = r_writer.writer;
-    
+
     const int64_t data_size = 10 * 1024 * 1024LL;   // 10MB
     uint8_t *data_str = static_cast<uint8_t *>(malloc(data_size));
     assert(data_str != nullptr);
@@ -76,10 +77,10 @@ void test_multipart(const opendal_operator *op)
     assert(r_writer_write.error == nullptr);
     r_writer_write = opendal_writer_write(writer, &data);
     assert(r_writer_write.error == nullptr);
-    
+
     // abort
     assert(nullptr == opendal_writer_abort(writer));
-    
+
     // should fail
     r_writer_write = opendal_writer_write(writer, &data);
     assert(r_writer_write.error != nullptr);
@@ -123,7 +124,7 @@ void test_rw(const opendal_operator *op)
     std::cout << "======================================= Finish test_rw =======================================" << std::endl;
 }
 
-void test_tagging(const opendal_operator *op) 
+void test_tagging(const opendal_operator *op)
 {
     std::cout << "======================================= Begin test_tagging =======================================" << std::endl;
     assert(op != nullptr);
@@ -157,7 +158,7 @@ void test_tagging(const opendal_operator *op)
         opendal_object_tagging_set(tagging, "key2", "value2");
         opendal_error *error = opendal_operator_put_object_tagging(op, "/testpath", tagging);
         assert(error == nullptr);
-        
+
         opendal_object_tagging_free(tagging);
     }
 
@@ -166,7 +167,6 @@ void test_tagging(const opendal_operator *op)
         opendal_result_get_object_tagging result = opendal_operator_get_object_tagging(op, "/testpath");
         assert(result.error == nullptr);
         assert(result.tagging != nullptr);
-        // 
 
         opendal_result_object_tagging_get result2 = opendal_object_tagging_get(result.tagging, "key");
         assert(result2.error == nullptr);
@@ -180,7 +180,7 @@ void test_tagging(const opendal_operator *op)
         opendal_bytes_free(&result3.value);
         opendal_object_tagging_free(result.tagging);
     }
-    
+
     std::cout << "======================================= Finish test_tagging =======================================" << std::endl;
 }
 
@@ -272,6 +272,30 @@ void test_list(const opendal_operator *op)
     std::cout << "======================================= Finish test_list =======================================" << std::endl;
 }
 
+void test_wrong_endpoint(const opendal_operator *op)
+{
+    std::cout << "======================================= Begin test_wrong_endpoint =======================================" << std::endl;
+    assert(op != nullptr);
+    opendal_bytes data = {
+        .data = (uint8_t*)"this_string_length_is_24",
+        .len = 24,
+    };
+    opendal_error *error =  opendal_operator_write(op, "/testpath", &data);
+    assert(error != nullptr);
+    std::cout << error->code << ' ' << error->message.data << std::endl;
+
+    opendal_writer *writer = nullptr;
+    opendal_result_operator_writer result = opendal_operator_writer(op, "/testpath");
+    assert(result.error == nullptr);
+    writer = result.writer;
+    opendal_result_writer_write result2 = opendal_writer_write(writer, &data);
+    assert(result2.error == nullptr);
+    opendal_error *error2 = opendal_writer_close(writer);
+    assert(error2 != nullptr);
+    std::cout << error2->code << ' ' << error2->message.data << std::endl;
+    opendal_writer_free(writer);
+    std::cout << "======================================= End test_wrong_endpoint =======================================" << std::endl;
+}
 int main()
 {
     opendal_error *error = opendal_init_env(nullptr, nullptr);
@@ -289,6 +313,7 @@ int main()
     test_rw(op);
     test_tagging(op);
     test_list(op);
+    test_wrong_endpoint(op);
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);

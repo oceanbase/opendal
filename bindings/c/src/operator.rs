@@ -20,7 +20,7 @@ use std::ffi::c_void;
 use std::os::raw::c_char;
 use std::str::FromStr;
 use tracing_subscriber;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, fmt::time::OffsetTime};
 use std::alloc::{System, GlobalAlloc, Layout};
 
 use ::opendal as core;
@@ -72,6 +72,7 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mu
     } else {
         None
     };
+
     let free_fn: Option<FreeFn> = if !free.is_null() {
         Some(unsafe { std::mem::transmute(free) })
     } else {
@@ -88,7 +89,7 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mu
         FREE_FN = free_fn;
     }
 
-    match tracing_subscriber::registry().with(fmt::layer()).try_init() {
+    match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(OffsetTime::local_rfc_3339().expect("could not get local offset!"))).try_init() {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => {
             unsafe {

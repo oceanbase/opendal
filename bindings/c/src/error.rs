@@ -49,6 +49,11 @@ pub enum opendal_code {
     OPENDAL_CONDITION_NOT_MATCH,
     /// The range of the content is not satisfied.
     OPENDAL_RANGE_NOT_SATISFIED,
+    /// The region name or The bucket name is invalid
+    OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
+    /// 
+    OPENDAL_CHECKSUM_ERROR,
+    OPENDAL_REGION_MISMATCH,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -66,6 +71,9 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::IsSameFile => opendal_code::OPENDAL_IS_SAME_FILE,
             core::ErrorKind::ConditionNotMatch => opendal_code::OPENDAL_CONDITION_NOT_MATCH,
             core::ErrorKind::RangeNotSatisfied => opendal_code::OPENDAL_RANGE_NOT_SATISFIED,
+            core::ErrorKind::InvalidObjectStorageEndpoint => opendal_code::OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
+            core::ErrorKind::ChecksumError => opendal_code::OPENDAL_CHECKSUM_ERROR,
+            core::ErrorKind::RegionMismatch => opendal_code::OPENDAL_REGION_MISMATCH,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
