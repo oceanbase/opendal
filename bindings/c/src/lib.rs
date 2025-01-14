@@ -37,6 +37,9 @@ pub use error::opendal_error;
 mod lister;
 pub use lister::opendal_lister;
 
+mod deleter;
+pub use deleter::opendal_deleter;
+
 mod metadata;
 pub use metadata::opendal_metadata;
 
@@ -51,6 +54,7 @@ pub use result::opendal_result_exists;
 pub use result::opendal_result_is_exist;
 pub use result::opendal_result_list;
 pub use result::opendal_result_lister_next;
+pub use result::opendal_result_operator_deleter;
 pub use result::opendal_result_operator_new;
 pub use result::opendal_result_operator_reader;
 pub use result::opendal_result_operator_writer;

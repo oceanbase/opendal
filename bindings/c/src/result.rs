@@ -143,6 +143,15 @@ pub struct opendal_result_lister_next {
     pub error: *mut opendal_error,
 }
 
+/// \brief The result type returned by opendal_operator_deleter().
+#[repr(C)]
+pub struct opendal_result_operator_deleter {
+    /// The pointer for opendal_writer
+    pub deleter: *mut opendal_deleter,
+    /// The error, if ok, it is null
+    pub error: *mut opendal_error,
+}
+
 /// \brief The result type returned by opendal_operator_reader().
 /// The result type for opendal_operator_reader(), the field `reader` contains the reader
 /// of the path, which is an iterator of the objects under the path. the field `code` represents

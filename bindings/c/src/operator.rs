@@ -946,6 +946,23 @@ pub unsafe extern "C" fn opendal_operator_list(
     }
 }
 
+/// TODO
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_deleter(
+    op: &opendal_operator,
+) -> opendal_result_operator_deleter {
+    match op.deref().deleter() {
+        Ok(deleter) => opendal_result_operator_deleter {
+            deleter: Box::into_raw(Box::new(opendal_deleter::new(deleter))),
+            error: std::ptr::null_mut()
+        },
+        Err(e) => opendal_result_operator_deleter {
+            deleter: std::ptr::null_mut(),
+            error: opendal_error::new(e),
+        },
+    }
+}
+
 /// \brief Blocking create the directory in `path`.
 ///
 /// Create the directory in `path` blocking by `op_ptr`.

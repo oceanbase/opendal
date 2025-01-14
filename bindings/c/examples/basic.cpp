@@ -79,13 +79,18 @@ void test_multipart(const opendal_operator *op)
     assert(r_writer_write.error == nullptr);
 
     // abort
-    assert(nullptr == opendal_writer_abort(writer));
+    opendal_error *error = opendal_writer_abort(writer);
+    assert(error == nullptr);
 
     // should fail
     r_writer_write = opendal_writer_write(writer, &data);
     assert(r_writer_write.error != nullptr);
     std::cout << r_writer_write.error->code << std::endl;
     std::cout << (const char *)(r_writer_write.error->message.data) << std::endl;
+
+    opendal_error_free(r_writer_write.error);
+    free(data_str);
+    opendal_writer_free(writer);
     std::cout << "======================================= Finish test_multipart =======================================" << std::endl;
 }
 
@@ -212,7 +217,8 @@ void test_list(const opendal_operator *op)
         // first should be testpath/b
         opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
         assert(r_lister_next.error == nullptr);
-        assert((entry = r_lister_next.entry) != nullptr);
+        assert(r_lister_next.entry != nullptr);
+        entry = r_lister_next.entry;
         assert(0 == strcmp("testpath/b", opendal_entry_path(entry)));
         // check file length
         opendal_metadata *meta = opendal_entry_metadata(entry);
@@ -225,7 +231,8 @@ void test_list(const opendal_operator *op)
         // second should be testpath/c/d
         r_lister_next = opendal_lister_next(lister);
         assert(r_lister_next.error == nullptr);
-        assert((entry = r_lister_next.entry) != nullptr);
+        assert(r_lister_next.entry != nullptr);
+        entry = r_lister_next.entry;
         assert(0 == strcmp("testpath/c/d", opendal_entry_path(entry)));
         opendal_entry_free(entry);
         entry = nullptr;
@@ -249,7 +256,8 @@ void test_list(const opendal_operator *op)
         // first should be testpath/c/, because common prefix is handled first
         opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
         assert(r_lister_next.error == nullptr);
-        assert((entry = r_lister_next.entry) != nullptr);
+        assert(r_lister_next.entry != nullptr);
+        entry = r_lister_next.entry;
         assert(0 == strcmp("testpath/c/", opendal_entry_path(entry)));
         opendal_entry_free(entry);
         entry = nullptr;
@@ -257,7 +265,8 @@ void test_list(const opendal_operator *op)
         // second should be testpath/b
         r_lister_next = opendal_lister_next(lister);
         assert(r_lister_next.error == nullptr);
-        assert((entry = r_lister_next.entry) != nullptr);
+        assert(r_lister_next.entry != nullptr);
+        entry = r_lister_next.entry;
         assert(0 == strcmp("testpath/b", opendal_entry_path(entry)));
         opendal_entry_free(entry);
         entry = nullptr;
@@ -283,6 +292,8 @@ void test_wrong_endpoint(const opendal_operator *op)
     opendal_error *error =  opendal_operator_write(op, "/testpath", &data);
     assert(error != nullptr);
     std::cout << error->code << ' ' << error->message.data << std::endl;
+    opendal_error_free(error);
+    error = nullptr;
 
     opendal_writer *writer = nullptr;
     opendal_result_operator_writer result = opendal_operator_writer(op, "/testpath");
@@ -293,9 +304,55 @@ void test_wrong_endpoint(const opendal_operator *op)
     opendal_error *error2 = opendal_writer_close(writer);
     assert(error2 != nullptr);
     std::cout << error2->code << ' ' << error2->message.data << std::endl;
+    opendal_error_free(error2);
     opendal_writer_free(writer);
     std::cout << "======================================= End test_wrong_endpoint =======================================" << std::endl;
 }
+
+void test_batch_delete(const opendal_operator *op)
+{
+    std::cout << "======================================= Begin test_batch_delete =======================================" << std::endl;
+    assert(op != nullptr);
+    opendal_bytes data = {
+        .data = (uint8_t*)"this_string_length_is_24",
+        .len = 24,
+    };
+
+    opendal_error *error = opendal_operator_write(op, "testpath/a", &data);
+    assert(error == nullptr);
+    error = opendal_operator_write(op, "testpath/b", &data);
+    assert(error == nullptr);
+    error = opendal_operator_write(op, "testpath/c/d", &data);
+    assert(error == nullptr);
+    opendal_result_exists result_exists = opendal_operator_exists(op, "testpath/a");
+    assert(result_exists.error == nullptr);
+    assert(result_exists.exists == true);
+
+    opendal_result_operator_deleter result_deleter = opendal_operator_deleter(op);
+    assert(result_deleter.error == nullptr);
+    assert(result_deleter.deleter != nullptr);
+    opendal_deleter *deleter = result_deleter.deleter;
+
+    error = opendal_deleter_delete(deleter, "testpath/a");
+    assert(error == nullptr);
+    error = opendal_deleter_delete(deleter, "testpath/b");
+    assert(error == nullptr);
+    error = opendal_deleter_delete(deleter, "testpath/c/d");
+    assert(error == nullptr);
+    error = opendal_deleter_delete(deleter, "testpath/fake-object");
+    assert(error == nullptr);
+
+    error = opendal_deleter_flush(deleter);
+    assert(error == nullptr);
+    opendal_deleter_free(deleter);
+
+    result_exists = opendal_operator_exists(op, "testpath/a");
+    assert(result_exists.error == nullptr);
+    assert(result_exists.exists == false);
+
+    std::cout << "======================================= End test_batch_delete =======================================" << std::endl;
+}
+
 int main()
 {
     opendal_error *error = opendal_init_env(nullptr, nullptr);
@@ -313,6 +370,7 @@ int main()
     test_rw(op);
     test_tagging(op);
     test_list(op);
+    test_batch_delete(op);
     // TODO: This case is not being run at the moment, in the future it will be run using gtest.
     // test_wrong_endpoint(op);
 

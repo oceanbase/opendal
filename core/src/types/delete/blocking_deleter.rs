@@ -109,4 +109,9 @@ impl BlockingDeleter {
         }
         Ok(())
     }
+
+    /// get cur size
+    pub fn cur_size(&self) -> usize {
+        self.cur_size
+    }
 }

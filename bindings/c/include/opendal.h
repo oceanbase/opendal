@@ -195,6 +195,17 @@ typedef struct opendal_lister {
 } opendal_lister;
 
 /**
+ * TODO
+ */
+typedef struct opendal_deleter {
+  /**
+   * The pointer to the opendal::BlockingDeleter in the Rust code.
+   * Only touch this on judging whether it is NULL.
+   */
+  void *inner;
+} opendal_deleter;
+
+/**
  * \brief Carries all metadata associated with a **path**.
  *
  * The metadata of the "thing" under a path. Please **only** use the opendal_metadata
@@ -454,6 +465,20 @@ typedef struct opendal_result_list {
 } opendal_result_list;
 
 /**
+ * \brief The result type returned by opendal_operator_deleter().
+ */
+typedef struct opendal_result_operator_deleter {
+  /**
+   * The pointer for opendal_writer
+   */
+  struct opendal_deleter *deleter;
+  /**
+   * The error, if ok, it is null
+   */
+  struct opendal_error *error;
+} opendal_result_operator_deleter;
+
+/**
  * \brief Metadata for **operator**, users can use this metadata to get information
  * of operator.
  */
@@ -690,6 +715,21 @@ struct opendal_result_lister_next opendal_lister_next(struct opendal_lister *sel
  * \brief Free the heap-allocated metadata used by opendal_lister
  */
 void opendal_lister_free(struct opendal_lister *ptr);
+
+/**
+ * 将一个路径插入待删除列表
+ */
+struct opendal_error *opendal_deleter_delete(struct opendal_deleter *self, const char *path);
+
+/**
+ * 批量删除当前缓存的待删除对象
+ */
+struct opendal_error *opendal_deleter_flush(struct opendal_deleter *self);
+
+/**
+ * \brief Free the heap-allocated metadata used by opendal_lister
+ */
+void opendal_deleter_free(struct opendal_deleter *ptr);
 
 /**
  * \brief Free the heap-allocated metadata used by opendal_metadata
@@ -1232,6 +1272,11 @@ struct opendal_result_list opendal_operator_list(const struct opendal_operator *
                                                  uintptr_t limit,
                                                  bool recursive,
                                                  const char *start_after);
+
+/**
+ * TODO
+ */
+struct opendal_result_operator_deleter opendal_operator_deleter(const struct opendal_operator *op);
 
 /**
  * \brief Blocking create the directory in `path`.

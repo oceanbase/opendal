@@ -37,7 +37,6 @@ pub(crate) struct S3Error {
 /// Parse error response into Error.
 pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, body) = resp.into_parts();
-    
     let (mut kind, mut retryable) = match parts.status.as_u16() {
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
