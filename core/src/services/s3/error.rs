@@ -37,7 +37,7 @@ pub(crate) struct S3Error {
 /// Parse error response into Error.
 pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, body) = resp.into_parts();
-    println!("{:?}, {:?}", parts, body);
+    
     let (mut kind, mut retryable) = match parts.status.as_u16() {
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
@@ -90,11 +90,10 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     if msg.contains("region") && msg.contains("is wrong; expecting") {
         return Some((ErrorKind::RegionMismatch, false))
     }
+    if code == "InvalidRequest" && msg.contains("x-amz-checksum") {
+        return Some((ErrorKind::ChecksumError, false))
+    }
     match code {
-        // > The specified bucket does not exist.
-        //
-        // Although the status code is 404, NoSuchBucket is
-        // a config invalid error, and it's not retryable from OpenDAL.
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         // > Your socket connection to the server was not read from
@@ -117,10 +116,15 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
         // indicates a temporary issue with the service or server, such as high load,
         // maintenance, or an internal problem.
         "ServiceUnavailable" => Some((ErrorKind::Unexpected, true)),
+        // > The specified bucket does not exist.
+        //
+        // Although the status code is 404, NoSuchBucket is
+        // a config invalid error, we redefine it into invalid object storage endpoint
+        // in oceanbase, and it's not retryable from OpenDAL.
         "NoSuchBucket" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
         "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
         "InvalidRegionName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
-        "InvalidRequest" => Some((ErrorKind::ChecksumError, false)),
+        "InvalidRequest" => Some((ErrorKind::Unexpected, false)),
         _ => None,
     }
 }

@@ -495,8 +495,8 @@ impl S3Builder {
                 if endpoint.starts_with("http") {
                     endpoint.to_string()
                 } else {
-                    // Prefix https if endpoint doesn't start with scheme.
-                    format!("https://{endpoint}")
+                    // Prefix http if endpoint doesn't start with scheme.
+                    format!("http://{endpoint}")
                 }
             }
             None => "https://s3.amazonaws.com".to_string(),
@@ -775,12 +775,8 @@ impl Builder for S3Builder {
         }
 
         if cfg.region.is_none() {
-            return Err(Error::new(
-                ErrorKind::RegionMismatch,
-                "region is missing. Please find it by S3::detect_region() or set them in env.",
-            )
-            .with_operation("Builder::build")
-            .with_context("service", Scheme::S3));
+            // By default, region is set to us-east-1, which is consistent with aws-sdk-cpp.
+            cfg.region = Some(String::from("us-east-1"));
         }
 
         let region = cfg.region.to_owned().unwrap();

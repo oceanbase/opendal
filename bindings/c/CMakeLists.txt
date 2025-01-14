@@ -24,6 +24,9 @@ endif()
 
 option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" OFF)
 
+# Disabled by default, it can be enabled with -DUSE_GTEST=ON
+option(USE_GTEST "Enable building and running Google Test unit tests." OFF)
+include(FetchContent)
 # force the compiler to support these standards
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -68,6 +71,25 @@ target_link_libraries(basic opendal_c_shared)
 
 add_executable(error_handle examples/error_handle.c)
 target_link_libraries(error_handle opendal_c_shared)
+
+if (USE_GTEST)
+    set(GOOGLETEST_VERSION 1.8.0)
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/release-${GOOGLETEST_VERSION}.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(googletest)
+
+    # test targets
+    file(GLOB TEST_SRCS tests/*.cpp)
+    add_executable(tests ${TEST_SRCS})
+    target_link_libraries(tests opendal_c_shared gtest_main)
+    if (TEST_ENABLE_ASAN)
+        target_compile_options(tests PRIVATE -fsanitize=address)
+        target_link_options(tests PRIVATE -fsanitize=address)
+    endif()
+endif()
 
 install(
     FILES ${OPENDAL_STATIC_LIB}

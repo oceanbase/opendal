@@ -33,7 +33,6 @@ use http::header::CACHE_CONTROL;
 use http::header::CONTENT_DISPOSITION;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::header::HOST;
 use http::header::IF_MATCH;
 use http::header::IF_NONE_MATCH;
 use http::HeaderValue;
@@ -165,7 +164,7 @@ impl S3Core {
         // As discussed in <https://github.com/seanmonstar/reqwest/issues/1809>,
         // google server could send RST_STREAM of PROTOCOL_ERROR if our request
         // contains host header.
-        req.headers_mut().remove(HOST);
+        // req.headers_mut().remove(HOST);
 
         Ok(())
     }
@@ -187,7 +186,7 @@ impl S3Core {
         // As discussed in <https://github.com/seanmonstar/reqwest/issues/1809>,
         // google server could send RST_STREAM of PROTOCOL_ERROR if our request
         // contains host header.
-        req.headers_mut().remove(HOST);
+        // req.headers_mut().remove(HOST);
 
         Ok(())
     }

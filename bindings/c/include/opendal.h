@@ -84,9 +84,13 @@ typedef enum opendal_code {
    */
   OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
   /**
-   *
+   * This error is retured when the uploaded checksum does not match the checksum
+   * calculated from the data accepted by the server.
    */
   OPENDAL_CHECKSUM_ERROR,
+  /**
+   * OpenDal returns this error to indicate that the region is not correct.
+   */
   OPENDAL_REGION_MISMATCH,
 } opendal_code;
 

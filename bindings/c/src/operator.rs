@@ -89,7 +89,15 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mu
         FREE_FN = free_fn;
     }
 
-    match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(OffsetTime::local_rfc_3339().expect("could not get local offset!"))).try_init() {
+    // Get the local time zone and format it to the log.
+    // TODO: it's ugly here, hopefully it can be improved in the future.
+    let timer = OffsetTime::local_rfc_3339();
+    if let Err(e) = timer {
+        return opendal_error::new(core::Error::new(core::ErrorKind::Unexpected, format!("{}, {}", e.to_string(), "failed to get local offset")));
+    }
+    let timer = timer.unwrap();
+
+    match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(timer)).try_init() {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => {
             unsafe {
