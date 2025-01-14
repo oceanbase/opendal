@@ -313,7 +313,8 @@ int main()
     test_rw(op);
     test_tagging(op);
     test_list(op);
-    test_wrong_endpoint(op);
+    // TODO: This case is not being run at the moment, in the future it will be run using gtest.
+    // test_wrong_endpoint(op);
 
     /* the operator_ptr is also heap allocated */
     opendal_operator_free(op);

@@ -69,7 +69,7 @@ TEST_F(OpendalListTest, ListDirTest)
         nullptr);
 
     // list must succeed since the write succeeded
-    opendal_result_list l = opendal_operator_list(this->p, (dname + "/").c_str());
+    opendal_result_list l = opendal_operator_list(this->p, (dname + "/").c_str(), 1000, true, "");
     EXPECT_EQ(l.error, nullptr);
 
     opendal_lister* lister = l.lister;

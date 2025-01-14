@@ -50,9 +50,11 @@ pub enum opendal_code {
     /// The range of the content is not satisfied.
     OPENDAL_RANGE_NOT_SATISFIED,
     /// The region name or The bucket name is invalid
-    OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
-    /// 
+    OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT, 
+    /// This error is retured when the uploaded checksum does not match the checksum 
+    /// calculated from the data accepted by the server.
     OPENDAL_CHECKSUM_ERROR,
+    /// OpenDal returns this error to indicate that the region is not correct.
     OPENDAL_REGION_MISMATCH,
 }
 
