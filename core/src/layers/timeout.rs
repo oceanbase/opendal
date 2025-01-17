@@ -394,6 +394,10 @@ impl<R: oio::Delete> oio::Delete for TimeoutWrapper<R> {
         let fut = self.inner.flush();
         Self::io_timeout(self.timeout, Operation::DeleterFlush.into_static(), fut).await
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
+    }
 }
 
 #[cfg(test)]

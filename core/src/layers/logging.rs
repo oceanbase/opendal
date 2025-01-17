@@ -1409,6 +1409,56 @@ impl<D: oio::Delete, I: LoggingInterceptor> oio::Delete for LoggingDeleter<D, I>
 
         res
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let version = args
+            .version()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "<latest>".to_string());
+
+        self.logger.log(
+            &self.info,
+            Operation::DeleterDeleted,
+            &[("path", path), ("version", &version)],
+            "started",
+            None,
+        );
+
+        let res = self.inner.deleted(path, args);
+
+        match &res {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::DeleterDeleted,
+                    &[
+                        ("path", path),
+                        ("version", &version),
+                        ("queued", &self.queued.to_string()),
+                        ("deleted", &self.deleted.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::DeleterDeleted,
+                    &[
+                        ("path", path),
+                        ("version", &version),
+                        ("queued", &self.queued.to_string()),
+                        ("deleted", &self.deleted.to_string()),
+                    ],
+                    "failed",
+                    Some(err),
+                );
+            }
+        };
+
+        res
+    }
 }
 
 impl<D: oio::BlockingDelete, I: LoggingInterceptor> oio::BlockingDelete for LoggingDeleter<D, I> {

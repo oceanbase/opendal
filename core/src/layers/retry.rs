@@ -766,6 +766,17 @@ impl<P: oio::Delete, I: RetryInterceptor> oio::Delete for RetryWrapper<P, I> {
         self.inner = Some(inner);
         res.map_err(|err| err.set_persistent())
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        { || self.inner.as_mut().unwrap().deleted(path, args.clone()) }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
 }
 
 impl<P: oio::BlockingDelete, I: RetryInterceptor> oio::BlockingDelete for RetryWrapper<P, I> {
@@ -1022,6 +1033,9 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
+        }
+        fn deleted(&mut self, _: &str, _: OpDelete) -> Result<bool> {
+            Ok(true)
         }
     }
 

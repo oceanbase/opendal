@@ -195,7 +195,10 @@ typedef struct opendal_lister {
 } opendal_lister;
 
 /**
- * TODO
+ * \brief The result type returned by opendal's deleter operation.
+ *
+ * \note The opendal_deleter actually owns a pointer to
+ * a opendal::BlockingDeleter, which is inside the Rust core code.
  */
 typedef struct opendal_deleter {
   /**
@@ -204,6 +207,28 @@ typedef struct opendal_deleter {
    */
   void *inner;
 } opendal_deleter;
+
+/**
+ *
+ */
+typedef struct opendal_result_deleter_deleted {
+  /**
+   *
+   */
+  bool deleted;
+  /**
+   *
+   */
+  struct opendal_error *error;
+} opendal_result_deleter_deleted;
+
+/**
+ *
+ */
+typedef struct opendal_result_deleter_flush {
+  uintptr_t deleted;
+  struct opendal_error *error;
+} opendal_result_deleter_flush;
 
 /**
  * \brief Carries all metadata associated with a **path**.
@@ -717,14 +742,20 @@ struct opendal_result_lister_next opendal_lister_next(struct opendal_lister *sel
 void opendal_lister_free(struct opendal_lister *ptr);
 
 /**
- * 将一个路径插入待删除列表
+ * \brief append a path into the deleter
  */
 struct opendal_error *opendal_deleter_delete(struct opendal_deleter *self, const char *path);
 
 /**
- * 批量删除当前缓存的待删除对象
+ * \brief check the path is deleted
  */
-struct opendal_error *opendal_deleter_flush(struct opendal_deleter *self);
+struct opendal_result_deleter_deleted opendal_deleter_deleted(struct opendal_deleter *self,
+                                                              const char *path);
+
+/**
+ * \brief delete all the paths in the deleter.
+ */
+struct opendal_result_deleter_flush opendal_deleter_flush(struct opendal_deleter *self);
 
 /**
  * \brief Free the heap-allocated metadata used by opendal_lister
@@ -801,7 +832,7 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
 
-struct opendal_error *opendal_init_env(void *alloc, void *free);
+struct opendal_error *opendal_init_env(void *alloc, void *free, void *loghandler);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
@@ -1084,6 +1115,16 @@ struct opendal_result_operator_writer opendal_operator_writer(const struct opend
  */
 struct opendal_error *opendal_operator_delete(const struct opendal_operator *op, const char *path);
 
+/**
+ * \brief Blocking put tagging to object in `path`
+ *
+ * Put tagging to object in `path` blocking by `op_ptr`
+ * Error is NULL if successful, otherwise it contains the error code and error message.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The designated path you want to put tagging to
+ * @param tagging The tagging you want to put
+ */
 struct opendal_error *opendal_operator_put_object_tagging(const struct opendal_operator *op,
                                                           const char *path,
                                                           const struct opendal_object_tagging *tagging);

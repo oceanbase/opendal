@@ -95,6 +95,7 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     match code {
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
+        "KeyTooLongError" => Some((ErrorKind::ConfigInvalid, false)),
         // > Your socket connection to the server was not read from
         // > or written to within the timeout period."
         //

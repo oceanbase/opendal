@@ -51,6 +51,9 @@ pub trait Delete: Unpin + Send + Sync {
     /// # Notes
     /// - This method is asynchronous and will wait for queued deletions to complete
     fn flush(&mut self) -> impl Future<Output = Result<usize>> + MaybeSend;
+
+    /// check the path is deleted
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool>;
 }
 
 impl Delete for () {
@@ -67,6 +70,14 @@ impl Delete for () {
             "output deleter doesn't support flush",
         ))
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let (_, _) = (path, args);
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "output deleter doesn't support deleted",
+        ))
+    }
 }
 
 /// The dyn version of [`Delete`]
@@ -76,6 +87,9 @@ pub trait DeleteDyn: Unpin + Send + Sync {
 
     /// The dyn version of [`Delete::flush`]
     fn flush_dyn(&mut self) -> BoxedFuture<Result<usize>>;
+
+    /// The dyn version of [`Delete::deleted`]
+    fn deleted_dyn(&mut self, path: &str, args: OpDelete) -> Result<bool>;
 }
 
 impl<T: Delete + ?Sized> DeleteDyn for T {
@@ -86,6 +100,10 @@ impl<T: Delete + ?Sized> DeleteDyn for T {
     fn flush_dyn(&mut self) -> BoxedFuture<Result<usize>> {
         Box::pin(self.flush())
     }
+
+    fn deleted_dyn(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        Delete::deleted(self, path, args)
+    }
 }
 
 impl<T: DeleteDyn + ?Sized> Delete for Box<T> {
@@ -95,6 +113,10 @@ impl<T: DeleteDyn + ?Sized> Delete for Box<T> {
 
     async fn flush(&mut self) -> Result<usize> {
         self.deref_mut().flush_dyn().await
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.deref_mut().deleted_dyn(path, args)
     }
 }
 
@@ -119,6 +141,15 @@ pub trait BlockingDelete: Send + Sync + 'static {
     ///   return an error if the queue is non-empty but no resources were deleted
     /// - `Err(err)`: An error occurred while performing the deletions
     fn flush(&mut self) -> Result<usize>;
+    
+    /// check the path is deleted
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let (_, _) = (path, args);
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "output deleter doesn't support deleted",
+        ))
+    }
 }
 
 impl BlockingDelete for () {
@@ -147,5 +178,9 @@ impl<T: BlockingDelete + ?Sized> BlockingDelete for Box<T> {
 
     fn flush(&mut self) -> Result<usize> {
         (**self).flush()
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        (**self).deleted(path, args)
     }
 }

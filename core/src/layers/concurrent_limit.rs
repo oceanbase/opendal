@@ -306,6 +306,10 @@ impl<R: oio::Delete> oio::Delete for ConcurrentLimitWrapper<R> {
     async fn flush(&mut self) -> Result<usize> {
         self.inner.flush().await
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
+    }
 }
 
 impl<R: oio::BlockingDelete> oio::BlockingDelete for ConcurrentLimitWrapper<R> {
