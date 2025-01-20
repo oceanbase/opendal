@@ -480,6 +480,15 @@ impl<T: oio::Delete> oio::Delete for ErrorContextWrapper<T> {
                     .with_context("deleted", self.processed.to_string())
             })
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args).map_err(|err| {
+            err.with_operation(Operation::DeleterDeleted)
+                .with_context("service", self.scheme)
+                .with_context("path", path)
+                .with_context("deleted", self.processed.to_string())
+        })
+    }
 }
 
 impl<T: oio::BlockingDelete> oio::BlockingDelete for ErrorContextWrapper<T> {

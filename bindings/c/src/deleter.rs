@@ -16,12 +16,16 @@
 // under the License.
 
 use ::opendal as core;
+use result::{opendal_result_deleter_deleted, opendal_result_deleter_flush};
 use std::ffi::c_void;
 use std::os::raw::c_char;
 
 use super::*;
 
-/// TODO
+/// \brief The result type returned by opendal's deleter operation.
+///
+/// \note The opendal_deleter actually owns a pointer to
+/// a opendal::BlockingDeleter, which is inside the Rust core code.
 #[repr(C)]
 pub struct opendal_deleter {
     /// The pointer to the opendal::BlockingDeleter in the Rust code.
@@ -44,7 +48,7 @@ impl opendal_deleter {
         }
     }
 
-    /// 将一个路径插入待删除列表
+    /// \brief append a path into the deleter
     #[no_mangle]
     pub unsafe extern "C" fn opendal_deleter_delete(
         &mut self,
@@ -63,28 +67,45 @@ impl opendal_deleter {
         }
     }
 
-    /// 批量删除当前缓存的待删除对象
+    /// \brief check the path is deleted
     #[no_mangle]
-    pub unsafe extern "C" fn opendal_deleter_flush(&mut self) -> *mut opendal_error {
-        match self.deref_mut().flush() {
-            Ok(deleted) => {
-                let cur_size = self.deref_mut().cur_size();
-                if cur_size == 0 {
-                    std::ptr::null_mut()
-                } else {
-                    opendal_error::new(
-                        core::Error::new(
-                            core::ErrorKind::Unexpected,
-                            &format!(
-                                "delete {} objects, but {} remained objects fail to delete",
-                                deleted, cur_size
-                            ),
-                        )
-                        .set_temporary(),
-                    )
+    pub unsafe extern "C" fn opendal_deleter_deleted(
+        &mut self,
+        path: *const c_char,
+    ) -> opendal_result_deleter_deleted {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_deleter_deleted {
+                    deleted: false,
+                    error: e,
                 }
             }
-            Err(e) => opendal_error::new(e),
+        };
+        match self.deref_mut().deleted(path) {
+            Ok(deleted) => opendal_result_deleter_deleted {
+                deleted,
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_deleter_deleted {
+                deleted: false,
+                error: opendal_error::new(e),
+            },
+        }
+    }
+
+    /// \brief delete all the paths in the deleter.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_deleter_flush(&mut self) -> opendal_result_deleter_flush {
+        match self.deref_mut().flush() {
+            Ok(deleted) => opendal_result_deleter_flush {
+                deleted,
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_deleter_flush {
+                deleted: 0,
+                error: opendal_error::new(e),
+            },
         }
     }
 

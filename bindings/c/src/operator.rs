@@ -16,11 +16,19 @@
 // under the License.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
 use std::os::raw::c_char;
 use std::str::FromStr;
+use std::ffi::CString;
+use std::ffi::c_void;
+use std::fmt::Write;
+
+use tracing::field::Field;
+use tracing::{span, Event, Subscriber};
 use tracing_subscriber;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, fmt::time::OffsetTime};
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt::time::OffsetTime};
 use std::alloc::{System, GlobalAlloc, Layout};
 
 use ::opendal as core;
@@ -62,11 +70,80 @@ unsafe impl GlobalAlloc for CustomAllocator {
     }
 }
 
+struct ObLogLayer;
+
+pub type LogHandler = unsafe extern "C" fn(level: *const c_char, message: *const c_char);
+static mut OB_LOG_HANDLER: Option<LogHandler> = None;
+
+impl<S> Layer<S> for ObLogLayer
+where
+    S: Subscriber 
+    + for<'a> LookupSpan<'a>
+{
+    fn on_event(&self, event: &Event, ctx: Context<S>) {
+        let mut message = String::new();
+
+        let metadata = event.metadata();
+
+        match (metadata.file(), metadata.line()) {
+            (Some(file), Some(line)) => {
+                let _ = write!(&mut message, "location={}:{}", file, line);
+            }
+            (Some(file), None) => {
+                let _ = write!(&mut message, "file={}", file);
+            }
+            (None, Some(line)) => {
+                let _ = write!(&mut message, "line={}", line);
+            }
+            (None, None) => {
+                let _ = write!(&mut message, "[file and line is none]");
+            }
+        };
+
+        event.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
+            let _ = write!(&mut message, ", {}: {:?}", field.name(), value);
+        });
+        
+        if let Some(current_span) = ctx.current_span().id() {
+            if let Some(span_ref) = ctx.span(current_span) {
+                if let Some(fields) = span_ref.extensions().get::<HashMap<String, String>>() {
+                    for (name, value) in fields {
+                        let _ = write!(&mut message, ", {}: {}", name, value);
+                    }
+                }
+            }
+        }
+
+        match (CString::new(metadata.level().to_string()), CString::new(message)) {
+            (Ok(level), Ok(message)) => {
+                unsafe {
+                    if let Some(loghandler) = OB_LOG_HANDLER {
+                        loghandler(level.as_ptr(), message.as_ptr());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let span = ctx.span(id).expect("Span must exist!");
+        let mut extensions = span.extensions_mut();
+
+        let mut fields = HashMap::new();
+        attrs.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
+            fields.insert(field.name().to_string(), format!("{:?}", value));
+        });
+
+        extensions.insert(fields);
+    }
+} 
+
 #[global_allocator]
 static GLOBAL: CustomAllocator = CustomAllocator;
 
 #[no_mangle]
-pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mut opendal_error {
+pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void, loghandler: *mut c_void) -> *mut opendal_error {
     let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
         Some(unsafe { std::mem::transmute(alloc) })
     } else {
@@ -79,6 +156,12 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mu
         None
     };
 
+    let loghandler_fn: Option<LogHandler> = if !loghandler.is_null() {
+        Some(unsafe { std::mem::transmute(loghandler) })
+    } else {
+        None
+    };
+
     if alloc_fn.is_none() || free_fn.is_none() {
         let err = core::Error::new(core::ErrorKind::ConfigInvalid, "invalid mem func");
         return opendal_error::new(err);
@@ -87,25 +170,38 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void) -> *mu
     unsafe {
         ALLOC_FN = alloc_fn;
         FREE_FN = free_fn;
+        OB_LOG_HANDLER = loghandler_fn;
     }
 
-    // Get the local time zone and format it to the log.
-    // TODO: it's ugly here, hopefully it can be improved in the future.
-    let timer = OffsetTime::local_rfc_3339();
-    if let Err(e) = timer {
-        return opendal_error::new(core::Error::new(core::ErrorKind::Unexpected, format!("{}, {}", e.to_string(), "failed to get local offset")));
-    }
-    let timer = timer.unwrap();
-
-    match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(timer)).try_init() {
-        Ok(_) => std::ptr::null_mut(),
-        Err(e) => {
-            unsafe {
-                ALLOC_FN = None;
-                FREE_FN = None;
+    if loghandler_fn.is_none() {
+        let timer = OffsetTime::local_rfc_3339();
+        if let Err(e) = timer {
+            return opendal_error::new(core::Error::new(core::ErrorKind::Unexpected, format!("{}, {}", e.to_string(), "failed to get local offset")));
+        }
+        match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(timer.unwrap())).try_init() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => {
+                unsafe {
+                    ALLOC_FN = None;
+                    FREE_FN = None;
+                    OB_LOG_HANDLER = None;
+                }
+                let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                opendal_error::new(err)
             }
-            let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
-            opendal_error::new(err)
+        }
+    } else {
+        match tracing_subscriber::registry().with(ObLogLayer).try_init() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => {
+                unsafe {
+                    ALLOC_FN = None;
+                    FREE_FN = None;
+                    OB_LOG_HANDLER = None;
+                }
+                let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                opendal_error::new(err)
+            }
         }
     }
 }
@@ -595,7 +691,14 @@ pub unsafe extern "C" fn opendal_operator_delete(
     }
 }
 
-//TODO
+/// \brief Blocking put tagging to object in `path`
+/// 
+/// Put tagging to object in `path` blocking by `op_ptr`
+/// Error is NULL if successful, otherwise it contains the error code and error message.
+/// 
+/// @param op The opendal_operator created previously
+/// @param path The designated path you want to put tagging to
+/// @param tagging The tagging you want to put
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_put_object_tagging(
     op: &opendal_operator,

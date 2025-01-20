@@ -1224,6 +1224,36 @@ impl<R: oio::Delete, I: MetricsIntercept> oio::Delete for MetricsWrapper<R, I> {
         );
         res
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let op = Operation::DeleterDeleted;
+
+        let start = Instant::now();
+
+        let res = match self.inner.deleted(path, args) {
+            Ok(entry) => Ok(entry),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
 }
 
 impl<R: oio::BlockingDelete, I: MetricsIntercept> oio::BlockingDelete for MetricsWrapper<R, I> {

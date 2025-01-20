@@ -66,8 +66,8 @@ target_include_directories(opendal_c_shared INTERFACE include)
 add_dependencies(opendal_c_shared cargo_build)
 
 # example targets
-add_executable(basic examples/basic.cpp)
-target_link_libraries(basic opendal_c_shared)
+# add_executable(basic examples/basic.cpp)
+# target_link_libraries(basic opendal_c_shared)
 
 add_executable(error_handle examples/error_handle.c)
 target_link_libraries(error_handle opendal_c_shared)
@@ -82,13 +82,21 @@ if (USE_GTEST)
     FetchContent_MakeAvailable(googletest)
 
     # test targets
-    file(GLOB TEST_SRCS tests/*.cpp)
+    file(GLOB TEST_SRCS 
+        tests/bdd.cpp 
+        tests/common.hpp 
+        tests/error_msg.cpp
+        tests/list.cpp
+        tests/opinfo.cpp)
     add_executable(tests ${TEST_SRCS})
     target_link_libraries(tests opendal_c_shared gtest_main)
     if (TEST_ENABLE_ASAN)
         target_compile_options(tests PRIVATE -fsanitize=address)
         target_link_options(tests PRIVATE -fsanitize=address)
     endif()
+
+    add_executable(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
+    target_link_libraries(obdal_test opendal_c_shared gtest)
 endif()
 
 install(

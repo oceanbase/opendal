@@ -16,7 +16,6 @@
 // under the License.
 
 use std::ffi::c_void;
-use bytes::Buf;
 
 use ::opendal as core;
 
@@ -82,7 +81,8 @@ impl opendal_reader {
                 }
 
                 unsafe {
-                    std::ptr::copy_nonoverlapping(buffer.chunk().as_ptr(), buf, read_len);
+                    let bytes = buffer.to_bytes();
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, read_len);
                 }
                 opendal_result_reader_read {
                     size: read_len,

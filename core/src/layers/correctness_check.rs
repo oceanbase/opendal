@@ -254,6 +254,10 @@ impl<T: oio::Delete> oio::Delete for CheckWrapper<T> {
     fn flush(&mut self) -> impl Future<Output = Result<usize>> + MaybeSend {
         self.inner.flush()
     }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
+    }
 }
 
 impl<T: oio::BlockingDelete> oio::BlockingDelete for CheckWrapper<T> {
@@ -325,6 +329,10 @@ mod tests {
 
         async fn flush(&mut self) -> Result<usize> {
             Ok(1)
+        }
+
+        fn deleted(&mut self, _: &str, _: OpDelete) -> Result<bool> {
+            Ok(true)
         }
     }
 

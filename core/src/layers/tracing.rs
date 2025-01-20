@@ -376,6 +376,11 @@ impl<R: oio::Delete> oio::Delete for TracingWrapper<R> {
     async fn flush(&mut self) -> Result<usize> {
         self.inner.flush().await
     }
+
+    #[tracing::instrument(parent = &self.span, level = "debug", skip_all)]
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
+    }
 }
 
 impl<R: oio::BlockingDelete> oio::BlockingDelete for TracingWrapper<R> {
@@ -387,5 +392,10 @@ impl<R: oio::BlockingDelete> oio::BlockingDelete for TracingWrapper<R> {
     #[tracing::instrument(parent = &self.span, level = "debug", skip_all)]
     fn flush(&mut self) -> Result<usize> {
         self.inner.flush()
+    }
+
+    #[tracing::instrument(parent = &self.span, level = "debug", skip_all)]
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
     }
 }

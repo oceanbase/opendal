@@ -55,6 +55,8 @@ pub enum Operation {
     DeleterDelete,
     /// Operation for [`crate::raw::oio::Delete::flush`]
     DeleterFlush,
+    /// Operation for [`crate::raw::oio::Delete::deleted`]
+    DeleterDeleted,
     /// Operation for [`crate::raw::Access::list`]
     List,
     /// Operation for [`crate::raw::oio::List::next`]
@@ -89,6 +91,8 @@ pub enum Operation {
     BlockingDeleterDelete,
     /// Operation for [`crate::raw::oio::BlockingDelete::flush`]
     BlockingDeleterFlush,
+    /// Operation for [`crate::raw::oio::BlockingDelete::deleted`]
+    BlockingDeleterDeleted,
     /// Operation for [`crate::raw::Access::blocking_list`]
     BlockingList,
     /// Operation for [`crate::raw::oio::BlockingList::next`]
@@ -163,8 +167,10 @@ impl From<Operation> for &'static str {
             Operation::BlockingListerNext => "BlockingLister::next",
             Operation::DeleterDelete => "Deleter::delete",
             Operation::DeleterFlush => "Deleter::flush",
+            Operation::DeleterDeleted => "Deleter::deleted",
             Operation::BlockingDeleterDelete => "BlockingDeleter::delete",
             Operation::BlockingDeleterFlush => "BlockingDeleter::flush",
+            Operation::BlockingDeleterDeleted => "BlockingDeleter::delted",
         }
     }
 }

@@ -152,6 +152,22 @@ pub struct opendal_result_operator_deleter {
     pub error: *mut opendal_error,
 }
 
+///
+#[repr(C)]
+pub struct opendal_result_deleter_flush {
+    pub deleted: usize,
+    pub error: *mut opendal_error,
+}
+
+///
+#[repr(C)]
+pub struct opendal_result_deleter_deleted {
+    ///
+    pub deleted: bool,
+    ///
+    pub error: *mut opendal_error,
+}
+
 /// \brief The result type returned by opendal_operator_reader().
 /// The result type for opendal_operator_reader(), the field `reader` contains the reader
 /// of the path, which is an iterator of the objects under the path. the field `code` represents
