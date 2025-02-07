@@ -297,6 +297,8 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
     type BlockingReader = RetryWrapper<RetryReader<A, A::BlockingReader>, I>;
     type Writer = RetryWrapper<A::Writer, I>;
     type BlockingWriter = RetryWrapper<A::BlockingWriter, I>;
+    type ObMultipartWriter = RetryWrapper<A::ObMultipartWriter, I>;
+    type BlockingObMultipartWriter = RetryWrapper<A::BlockingObMultipartWriter, I>;
     type Lister = RetryWrapper<A::Lister, I>;
     type BlockingLister = RetryWrapper<A::BlockingLister, I>;
     type Deleter = RetryWrapper<A::Deleter, I>;
@@ -336,6 +338,16 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
             .notify(|err, dur| self.notify.intercept(err, dur))
             .await
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
+            .map_err(|e| e.set_persistent())
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        { || self.inner.ob_multipart_write(path, args.clone()) }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| self.notify.intercept(err, dur))
+            .await
+            .map(|(rp, w)| (rp, RetryWrapper::new(w, self.notify.clone(), self.builder)))
             .map_err(|e| e.set_persistent())
     }
 
@@ -416,6 +428,16 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
             .notify(|err, dur| self.notify.intercept(err, dur))
             .call()
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
+            .map_err(|e| e.set_persistent())
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        { || self.inner.blocking_ob_multipart_write(path, args.clone()) }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| self.notify.intercept(err, dur))
+            .call()
+            .map(|(rp, w)| (rp, RetryWrapper::new(w, self.notify.clone(), self.builder)))
             .map_err(|e| e.set_persistent())
     }
 
@@ -696,6 +718,142 @@ impl<R: oio::BlockingWrite, I: RetryInterceptor> oio::BlockingWrite for RetryWra
     }
 }
 
+impl<R: oio::ObMultipartWrite, I: RetryInterceptor> oio::ObMultipartWrite for RetryWrapper<R, I> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        use backon::RetryableWithContext;
+        
+        let inner = self.take_inner()?;
+
+        let (inner, res) = {
+            |mut r: R| async move {
+                let res = r.initiate_part().await;
+                (r, res)
+            }
+        }
+        .retry(self.builder)
+        .when(|e| e.is_temporary())
+        .context(inner)
+        .notify(|err, dur| self.notify.intercept(err, dur))
+        .await;
+
+        self.inner = Some(inner);
+        res.map_err(|err| err.set_persistent())
+    }
+
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        use backon::RetryableWithContext;
+
+        let inner = self.take_inner()?;
+
+        let ((inner, _, _), res) = {
+            |(mut r, bs, part_id): (R, Buffer, usize)| async move {
+                let res = r.write_with_part_id(bs.clone(), part_id).await;
+                ((r, bs, part_id), res)
+            }
+        }
+        .retry(self.builder)
+        .when(|e| e.is_temporary())
+        .context((inner, bs, part_id))
+        .notify(|err, dur| self.notify.intercept(err, dur))
+        .await;
+
+        self.inner = Some(inner);
+        res.map_err(|err| err.set_persistent())
+    }
+
+
+    async fn close(&mut self) -> Result<()> {
+        use backon::RetryableWithContext;
+        
+        let inner = self.take_inner()?;
+
+        let (inner, res) = {
+            |mut r: R| async move {
+                let res = r.close().await;
+                (r, res)
+            }
+        }
+        .retry(self.builder)
+        .when(|e| e.is_temporary())
+        .context(inner)
+        .notify(|err, dur| self.notify.intercept(err, dur))
+        .await;
+
+        self.inner = Some(inner);
+        res.map_err(|err| err.set_persistent())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        use backon::RetryableWithContext;
+        
+        let inner = self.take_inner()?;
+
+        let (inner, res) = {
+            |mut r: R| async move {
+                let res = r.abort().await;
+                (r, res)
+            }
+        }
+        .retry(self.builder)
+        .when(|e| e.is_temporary())
+        .context(inner)
+        .notify(|err, dur| self.notify.intercept(err, dur))
+        .await;
+
+        self.inner = Some(inner);
+        res.map_err(|err| err.set_persistent())
+    }
+}
+
+impl<R: oio::BlockingObMultipartWrite, I: RetryInterceptor> oio::BlockingObMultipartWrite for RetryWrapper<R, I> {
+    fn initiate_part(&mut self) -> Result<()> {
+        { || self.inner.as_mut().unwrap().initiate_part() }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
+
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        { || self.inner.as_mut().unwrap().write_with_part_id(bs.clone(), part_id) }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
+
+
+    fn close(&mut self) -> Result<()> {
+        { || self.inner.as_mut().unwrap().close() }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        { || self.inner.as_mut().unwrap().abort() }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
+}
+
 impl<P: oio::List, I: RetryInterceptor> oio::List for RetryWrapper<P, I> {
     async fn next(&mut self) -> Result<Option<oio::Entry>> {
         use backon::RetryableWithContext;
@@ -840,10 +998,12 @@ mod tests {
     impl Access for MockService {
         type Reader = MockReader;
         type Writer = MockWriter;
+        type ObMultipartWriter = MockObMultipartWriter;
         type Lister = MockLister;
         type Deleter = MockDeleter;
         type BlockingReader = ();
         type BlockingWriter = ();
+        type BlockingObMultipartWriter = ();
         type BlockingLister = ();
         type BlockingDeleter = ();
 
@@ -948,6 +1108,28 @@ mod tests {
         }
 
         async fn abort(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+
+    struct MockObMultipartWriter {}
+
+    impl oio::ObMultipartWrite for MockObMultipartWriter {
+        async fn initiate_part(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<()> {
+            Err(Error::new(ErrorKind::Unexpected, "always close failed").set_temporary())
+        }
+
+        async fn abort(&mut self) -> Result<()> {
+            Ok(())
+        }
+        
+        async fn close(&mut self) -> Result<()> {
             Ok(())
         }
     }

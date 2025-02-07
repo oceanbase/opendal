@@ -45,6 +45,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         // Client Disconnect, we should retry it.
         499 => (ErrorKind::Unexpected, true),
         500 | 502 | 503 | 504 => (ErrorKind::Unexpected, true),
+        110 => (ErrorKind::TimedOut, true),
         _ => (ErrorKind::Unexpected, false),
     };
 

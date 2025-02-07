@@ -59,6 +59,8 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
     type Reader: oio::Read;
     /// Writer is the associated writer returned in `write` operation.
     type Writer: oio::Write;
+    /// ObMultipartWriter is the associated writer return in `ob_multipart_write` operation.
+    type ObMultipartWriter: oio::ObMultipartWrite;
     /// Lister is the associated lister returned in `list` operation.
     type Lister: oio::List;
     /// Deleter is the associated deleter returned in `delete` operation.
@@ -68,6 +70,8 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
     type BlockingReader: oio::BlockingRead;
     /// BlockingWriter is the associated writer returned `blocking_write` operation.
     type BlockingWriter: oio::BlockingWrite;
+    /// ObMultipartWriter is the associated writer return in `blocking_ob_multipart_write` operation.
+    type BlockingObMultipartWriter: oio::BlockingObMultipartWrite;
     /// BlockingLister is the associated lister returned `blocking_list` operation.
     type BlockingLister: oio::BlockingList;
     /// BlockingDeleter is the associated deleter returned `blocking_delete` operation.
@@ -187,6 +191,20 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
         path: &str,
         args: OpWrite,
     ) -> impl Future<Output = Result<(RpWrite, Self::Writer)>> + MaybeSend {
+        let (_, _) = (path, args);
+
+        ready(Err(Error::new(
+            ErrorKind::Unsupported,
+            "operation is not supported",
+        )))
+    }
+
+    ///
+    fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> impl Future<Output = Result<(RpWrite, Self::ObMultipartWriter)>> + MaybeSend {
         let (_, _) = (path, args);
 
         ready(Err(Error::new(
@@ -373,6 +391,16 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
         ))
     }
 
+    ///
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let (_, _) = (path, args);
+
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "operation is not supported",
+        ))
+    }
+
     /// Invoke the `blocking_delete` operation on the specified path.
     ///
     /// This operation is the blocking version of [`Accessor::delete`]
@@ -468,6 +496,12 @@ pub trait AccessDyn: Send + Sync + Debug + Unpin {
         path: &'a str,
         args: OpWrite,
     ) -> BoxedFuture<'a, Result<(RpWrite, oio::Writer)>>;
+    /// Dyn version of [`Accessor::ob_multipart_write`]
+    fn ob_multipart_write_dyn<'a>(
+        &'a self,
+        path: &'a str,
+        args: OpWrite,
+    ) -> BoxedFuture<'a, Result<(RpWrite, oio::ObMultipartWriter)>>;
     /// Dyn version of [`Accessor::delete`]
     fn delete_dyn(&self) -> BoxedFuture<Result<(RpDelete, oio::Deleter)>>;
     /// Dyn version of [`Accessor::list`]
@@ -519,6 +553,12 @@ pub trait AccessDyn: Send + Sync + Debug + Unpin {
         path: &str,
         args: OpWrite,
     ) -> Result<(RpWrite, oio::BlockingWriter)>;
+    /// Dyn version of [`Accessor::blocking_ob_multipart_write`]
+    fn blocking_ob_multipart_write_dyn(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, oio::BlockingObMultipartWriter)>;
     /// Dyn version of [`Accessor::blocking_delete`]
     fn blocking_delete_dyn(&self) -> Result<(RpDelete, oio::BlockingDeleter)>;
     /// Dyn version of [`Accessor::blocking_list`]
@@ -536,6 +576,8 @@ where
         BlockingReader = oio::BlockingReader,
         Writer = oio::Writer,
         BlockingWriter = oio::BlockingWriter,
+        ObMultipartWriter = oio::ObMultipartWriter,
+        BlockingObMultipartWriter = oio::BlockingObMultipartWriter,
         Lister = oio::Lister,
         BlockingLister = oio::BlockingLister,
         Deleter = oio::Deleter,
@@ -587,6 +629,14 @@ where
         args: OpWrite,
     ) -> BoxedFuture<'a, Result<(RpWrite, oio::Writer)>> {
         Box::pin(self.write(path, args))
+    }
+
+    fn ob_multipart_write_dyn<'a>(
+            &'a self,
+            path: &'a str,
+            args: OpWrite,
+        ) -> BoxedFuture<'a, Result<(RpWrite, oio::ObMultipartWriter)>> {
+        Box::pin(self.ob_multipart_write(path, args))
     }
 
     fn delete_dyn(&self) -> BoxedFuture<Result<(RpDelete, oio::Deleter)>> {
@@ -662,6 +712,14 @@ where
         self.blocking_write(path, args)
     }
 
+    fn blocking_ob_multipart_write_dyn(
+            &self,
+            path: &str,
+            args: OpWrite,
+        ) -> Result<(RpWrite, oio::BlockingObMultipartWriter)> {
+        self.blocking_ob_multipart_write(path, args)
+    }
+
     fn blocking_delete_dyn(&self) -> Result<(RpDelete, oio::BlockingDeleter)> {
         self.blocking_delete()
     }
@@ -683,8 +741,10 @@ impl Access for dyn AccessDyn {
     type Reader = oio::Reader;
     type BlockingReader = oio::BlockingReader;
     type Writer = oio::Writer;
+    type ObMultipartWriter = oio::ObMultipartWriter;
     type Deleter = oio::Deleter;
     type BlockingWriter = oio::BlockingWriter;
+    type BlockingObMultipartWriter = oio::BlockingObMultipartWriter;
     type Lister = oio::Lister;
     type BlockingLister = oio::BlockingLister;
     type BlockingDeleter = oio::BlockingDeleter;
@@ -715,6 +775,10 @@ impl Access for dyn AccessDyn {
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
         self.write_dyn(path, args).await
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.ob_multipart_write_dyn(path, args).await
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
@@ -761,6 +825,10 @@ impl Access for dyn AccessDyn {
         self.blocking_write_dyn(path, args)
     }
 
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.blocking_ob_multipart_write_dyn(path, args)
+    }
+
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {
         self.blocking_delete_dyn()
     }
@@ -782,10 +850,12 @@ impl Access for dyn AccessDyn {
 impl Access for () {
     type Reader = ();
     type Writer = ();
+    type ObMultipartWriter = ();
     type Lister = ();
     type Deleter = ();
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 
@@ -809,10 +879,12 @@ impl Access for () {
 impl<T: Access + ?Sized> Access for Arc<T> {
     type Reader = T::Reader;
     type Writer = T::Writer;
+    type ObMultipartWriter = T::ObMultipartWriter;
     type Lister = T::Lister;
     type Deleter = T::Deleter;
     type BlockingReader = T::BlockingReader;
     type BlockingWriter = T::BlockingWriter;
+    type BlockingObMultipartWriter = T::BlockingObMultipartWriter;
     type BlockingLister = T::BlockingLister;
     type BlockingDeleter = T::BlockingDeleter;
 
@@ -861,6 +933,14 @@ impl<T: Access + ?Sized> Access for Arc<T> {
         args: OpWrite,
     ) -> impl Future<Output = Result<(RpWrite, Self::Writer)>> + MaybeSend {
         async move { self.as_ref().write(path, args).await }
+    }
+
+    fn ob_multipart_write(
+            &self,
+            path: &str,
+            args: OpWrite,
+        ) -> impl Future<Output = Result<(RpWrite, Self::ObMultipartWriter)>> + MaybeSend {
+        async move { self.as_ref().ob_multipart_write(path, args).await }
     }
 
     fn delete(&self) -> impl Future<Output = Result<(RpDelete, Self::Deleter)>> + MaybeSend {
@@ -930,6 +1010,10 @@ impl<T: Access + ?Sized> Access for Arc<T> {
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
         self.as_ref().blocking_write(path, args)
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.as_ref().blocking_ob_multipart_write(path, args)
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {

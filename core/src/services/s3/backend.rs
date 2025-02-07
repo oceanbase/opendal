@@ -906,10 +906,12 @@ pub struct S3Backend {
 impl Access for S3Backend {
     type Reader = HttpBody;
     type Writer = S3Writers;
+    type ObMultipartWriter = S3Writers;
     type Lister = S3Listers;
     type Deleter = oio::BatchDeleter<S3Deleter>;
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 
@@ -1068,6 +1070,19 @@ impl Access for S3Backend {
         let w = oio::MultipartWriter::new(writer, executor, concurrent);
 
         Ok((RpWrite::default(), w))
+    }
+
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let concurrent = args.concurrent();
+        let executor = args.executor().cloned();
+        let writer = S3Writer::new(self.core.clone(), path, args);
+
+        let w = oio::MultipartWriter::new(writer, executor, concurrent);
+        Ok((RpWrite::default(), w))    
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {

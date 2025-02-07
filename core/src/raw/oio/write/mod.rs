@@ -20,6 +20,10 @@ pub use api::BlockingWrite;
 pub use api::BlockingWriter;
 pub use api::Write;
 pub use api::Writer;
+pub use api::ObMultipartWrite;
+pub use api::ObMultipartWriter;
+pub use api::BlockingObMultipartWrite;
+pub use api::BlockingObMultipartWriter;
 
 mod multipart_write;
 pub use multipart_write::MultipartPart;

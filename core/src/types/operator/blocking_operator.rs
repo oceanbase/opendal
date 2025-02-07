@@ -711,6 +711,11 @@ impl BlockingOperator {
     pub fn writer(&self, path: &str) -> Result<BlockingWriter> {
         self.writer_with(path).call()
     }
+    
+    ///
+    pub fn ob_multipart_writer(&self, path: &str) -> Result<BlockingObMultipartWriter> {
+        self.ob_multipart_writer_with(path).call()
+    }
 
     /// Create a new reader with extra options
     ///
@@ -749,6 +754,33 @@ impl BlockingOperator {
 
                 let context = WriteContext::new(inner, path, args, options);
                 let w = BlockingWriter::new(context)?;
+                Ok(w)
+            },
+        ))
+    }
+
+    ///
+    pub fn ob_multipart_writer_with(&self, path: &str) -> FunctionObMultipartWriter {
+        let path = normalize_path(path);
+
+        FunctionObMultipartWriter(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            (OpWrite::default(), OpWriter::default()),
+            |inner, path, (args, options)| {
+                let path = normalize_path(&path);
+
+                if !validate_path(&path, EntryMode::FILE) {
+                    return Err(
+                        Error::new(ErrorKind::IsADirectory, "write path is a directory")
+                            .with_operation("BlockingOperator::writer_with")
+                            .with_context("service", inner.info().scheme().into_static())
+                            .with_context("path", &path),
+                    );
+                }
+
+                let context = ObMultipartWriteContext::new(inner, path, args, options);
+                let w = BlockingObMultipartWriter::new(context)?;
                 Ok(w)
             },
         ))

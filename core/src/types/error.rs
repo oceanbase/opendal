@@ -93,6 +93,8 @@ pub enum ErrorKind {
     ChecksumError,
     /// OpenDal returns this error to indicate that the region is not correct.
     RegionMismatch,
+    /// http request timed out.
+    TimedOut,
 }
 
 impl ErrorKind {
@@ -126,6 +128,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::InvalidObjectStorageEndpoint => "InvalidObjectStorageEndpoint",
             ErrorKind::ChecksumError => "ChecksumError",
             ErrorKind::RegionMismatch => "RegionMismatch",
+            ErrorKind::TimedOut => "TimedOut",
         }
     }
 }

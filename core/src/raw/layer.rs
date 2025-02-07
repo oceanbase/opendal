@@ -143,10 +143,12 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
 
     type Reader: oio::Read;
     type Writer: oio::Write;
+    type ObMultipartWriter: oio::ObMultipartWrite;
     type Lister: oio::List;
     type Deleter: oio::Delete;
     type BlockingReader: oio::BlockingRead;
     type BlockingWriter: oio::BlockingWrite;
+    type BlockingObMultipartWriter: oio::BlockingObMultipartWrite;
     type BlockingLister: oio::BlockingList;
     type BlockingDeleter: oio::BlockingDelete;
 
@@ -175,6 +177,12 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
         path: &str,
         args: OpWrite,
     ) -> impl Future<Output = Result<(RpWrite, Self::Writer)>> + MaybeSend;
+
+    fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> impl Future<Output = Result<(RpWrite, Self::ObMultipartWriter)>> + MaybeSend;
 
     fn copy(
         &self,
@@ -237,6 +245,8 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)>;
 
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)>;
+
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
         self.inner().blocking_copy(from, to, args)
     }
@@ -272,11 +282,13 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
 impl<L: LayeredAccess> Access for L {
     type Reader = L::Reader;
     type Writer = L::Writer;
+    type ObMultipartWriter = L::ObMultipartWriter;
     type Lister = L::Lister;
     type Deleter = L::Deleter;
 
     type BlockingReader = L::BlockingReader;
     type BlockingWriter = L::BlockingWriter;
+    type BlockingObMultipartWriter = L::BlockingObMultipartWriter;
     type BlockingLister = L::BlockingLister;
     type BlockingDeleter = L::BlockingDeleter;
 
@@ -294,6 +306,10 @@ impl<L: LayeredAccess> Access for L {
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
         LayeredAccess::write(self, path, args).await
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        LayeredAccess::ob_multipart_write(self, path, args).await
     }
 
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
@@ -338,6 +354,10 @@ impl<L: LayeredAccess> Access for L {
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
         LayeredAccess::blocking_write(self, path, args)
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        LayeredAccess::blocking_ob_multipart_write(self, path, args)
     }
 
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
@@ -401,6 +421,8 @@ mod tests {
         type BlockingReader = ();
         type Writer = ();
         type BlockingWriter = ();
+        type ObMultipartWriter = ();
+        type BlockingObMultipartWriter = ();
         type Lister = ();
         type BlockingLister = ();
         type Deleter = ();

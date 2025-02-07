@@ -155,10 +155,12 @@ impl<A: Access> LayeredAccess for TracingAccessor<A> {
     type Inner = A;
     type Reader = TracingWrapper<A::Reader>;
     type Writer = TracingWrapper<A::Writer>;
+    type ObMultipartWriter = TracingWrapper<A::ObMultipartWriter>;
     type Lister = TracingWrapper<A::Lister>;
     type Deleter = TracingWrapper<A::Deleter>;
     type BlockingReader = TracingWrapper<A::BlockingReader>;
     type BlockingWriter = TracingWrapper<A::BlockingWriter>;
+    type BlockingObMultipartWriter = TracingWrapper<A::BlockingObMultipartWriter>;
     type BlockingLister = TracingWrapper<A::BlockingLister>;
     type BlockingDeleter = TracingWrapper<A::BlockingDeleter>;
 
@@ -190,6 +192,14 @@ impl<A: Access> LayeredAccess for TracingAccessor<A> {
             .write(path, args)
             .await
             .map(|(rp, r)| (rp, TracingWrapper::new(Span::current(), r)))
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner
+            .ob_multipart_write(path, args)
+            .await
+            .map(|(rp, w)| (rp, TracingWrapper::new(Span::current(), w)))
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
@@ -244,6 +254,13 @@ impl<A: Access> LayeredAccess for TracingAccessor<A> {
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
         self.inner
             .blocking_write(path, args)
+            .map(|(rp, r)| (rp, TracingWrapper::new(Span::current(), r)))
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner
+            .blocking_ob_multipart_write(path, args)
             .map(|(rp, r)| (rp, TracingWrapper::new(Span::current(), r)))
     }
 
@@ -349,6 +366,74 @@ impl<R: oio::BlockingWrite> oio::BlockingWrite for TracingWrapper<R> {
         skip_all)]
     fn close(&mut self) -> Result<()> {
         self.inner.close()
+    }
+}
+
+impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TracingWrapper<R> {
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn initiate_part(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.initiate_part()
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.write_with_part_id(bs, part_id)
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn close(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.close()
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn abort(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.abort()
+    }
+}
+
+impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for TracingWrapper<R> {
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn initiate_part(&mut self) -> Result<()> {
+        self.inner.initiate_part()
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        self.inner.write_with_part_id(bs, part_id)
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn close(&mut self) -> Result<()> {
+        self.inner.close()
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn abort(&mut self) -> Result<()> {
+        self.inner.abort()
     }
 }
 

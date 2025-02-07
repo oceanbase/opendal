@@ -39,6 +39,16 @@ pub enum Operation {
     WriterClose,
     /// Operation for [`crate::raw::oio::Write::abort`]
     WriterAbort,
+    /// Operation for [`crate::raw::Access::ob_multipart_write`]
+    ObMultipartWrite,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::initiate_part`]
+    ObMultipartWriterInitiatePart,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::write_with_part_id`]
+    ObMultiPartWriterWriteWithPartId,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::close`]
+    ObMultipartWriterClose,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::abort`]
+    ObMultipartWriterAbort,
     /// Operation for [`crate::raw::Access::copy`]
     Copy,
     /// Operation for [`crate::raw::Access::rename`]
@@ -75,6 +85,16 @@ pub enum Operation {
     BlockingWriterWrite,
     /// Operation for [`crate::raw::oio::BlockingWrite::close`]
     BlockingWriterClose,
+    /// Operation for [`crate::raw::Access::blocking_ob_multipart_write`]
+    BlockingObMultipartWrite,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::initiate_part`]
+    BlockingObMultipartWriterInitiatePart,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::write_with_part_id`]
+    BlockingObMultiPartWriterWriteWithPartId,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::close`]
+    BlockingObMultipartWriterClose,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::abort`]
+    BlockingObMultipartWriterAbort,
     /// Operation for [`crate::raw::Access::blocking_copy`]
     BlockingCopy,
     /// Operation for [`crate::raw::Access::blocking_rename`]
@@ -142,6 +162,11 @@ impl From<Operation> for &'static str {
             Operation::WriterWrite => "Writer::write",
             Operation::WriterClose => "Writer::close",
             Operation::WriterAbort => "Writer::abort",
+            Operation::ObMultipartWrite => "ob_multipart_write",
+            Operation::ObMultipartWriterInitiatePart => "ObMultipartWriter::initiate_part",
+            Operation::ObMultiPartWriterWriteWithPartId => "ObMultipartWriter::write_with_part_id",
+            Operation::ObMultipartWriterClose => "ObMultipartWriter::close",
+            Operation::ObMultipartWriterAbort => "ObMultipartWriter::abort",
             Operation::Copy => "copy",
             Operation::Rename => "rename",
             Operation::Stat => "stat",
@@ -157,6 +182,11 @@ impl From<Operation> for &'static str {
             Operation::BlockingWrite => "blocking_write",
             Operation::BlockingWriterWrite => "BlockingWriter::write",
             Operation::BlockingWriterClose => "BlockingWriter::close",
+            Operation::BlockingObMultipartWrite => "blocking_ob_multipart_write",
+            Operation::BlockingObMultipartWriterInitiatePart => "BlockingObMultipartWriter::initiate_part",
+            Operation::BlockingObMultiPartWriterWriteWithPartId => "BlockingObMultipartWriter::write_with_part_id",
+            Operation::BlockingObMultipartWriterClose=> "BlockingObMultipartWriter::close",
+            Operation::BlockingObMultipartWriterAbort => "BlockingObMultipartWriter::abort",
             Operation::BlockingCopy => "blocking_copy",
             Operation::BlockingRename => "blocking_rename",
             Operation::BlockingStat => "blocking_stat",

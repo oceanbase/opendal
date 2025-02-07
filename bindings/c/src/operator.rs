@@ -16,20 +16,23 @@
 // under the License.
 
 use std::collections::HashMap;
+use std::ffi::c_void;
+use std::ffi::CString;
+use std::fmt::Write;
 use std::os::raw::c_char;
 use std::str::FromStr;
-use std::ffi::CString;
-use std::ffi::c_void;
-use std::fmt::Write;
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::time::Duration;
+use opendal::layers::RetryLayer;
+use opendal::layers::TimeoutLayer;
 use tracing::field::Field;
 use tracing::{span, Event, Subscriber};
 use tracing_subscriber;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt::time::OffsetTime};
-use std::alloc::{System, GlobalAlloc, Layout};
+use tracing_subscriber::{fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt};
 
 use ::opendal as core;
 use once_cell::sync::Lazy;
@@ -77,8 +80,7 @@ static mut OB_LOG_HANDLER: Option<LogHandler> = None;
 
 impl<S> Layer<S> for ObLogLayer
 where
-    S: Subscriber 
-    + for<'a> LookupSpan<'a>
+    S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event, ctx: Context<S>) {
         let mut message = String::new();
@@ -103,7 +105,7 @@ where
         event.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
             let _ = write!(&mut message, ", {}: {:?}", field.name(), value);
         });
-        
+
         if let Some(current_span) = ctx.current_span().id() {
             if let Some(span_ref) = ctx.span(current_span) {
                 if let Some(fields) = span_ref.extensions().get::<HashMap<String, String>>() {
@@ -114,19 +116,25 @@ where
             }
         }
 
-        match (CString::new(metadata.level().to_string()), CString::new(message)) {
-            (Ok(level), Ok(message)) => {
-                unsafe {
-                    if let Some(loghandler) = OB_LOG_HANDLER {
-                        loghandler(level.as_ptr(), message.as_ptr());
-                    }
+        match (
+            CString::new(metadata.level().to_string()),
+            CString::new(message),
+        ) {
+            (Ok(level), Ok(message)) => unsafe {
+                if let Some(loghandler) = OB_LOG_HANDLER {
+                    loghandler(level.as_ptr(), message.as_ptr());
                 }
-            }
+            },
             _ => {}
         }
     }
 
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_new_span(
+        &self,
+        attrs: &span::Attributes<'_>,
+        id: &span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         let span = ctx.span(id).expect("Span must exist!");
         let mut extensions = span.extensions_mut();
 
@@ -137,13 +145,17 @@ where
 
         extensions.insert(fields);
     }
-} 
+}
 
 #[global_allocator]
 static GLOBAL: CustomAllocator = CustomAllocator;
 
 #[no_mangle]
-pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void, loghandler: *mut c_void) -> *mut opendal_error {
+pub extern "C" fn opendal_init_env(
+    alloc: *mut c_void,
+    free: *mut c_void,
+    loghandler: *mut c_void,
+) -> *mut opendal_error {
     let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
         Some(unsafe { std::mem::transmute(alloc) })
     } else {
@@ -166,7 +178,7 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void, loghan
         let err = core::Error::new(core::ErrorKind::ConfigInvalid, "invalid mem func");
         return opendal_error::new(err);
     }
-    
+
     unsafe {
         ALLOC_FN = alloc_fn;
         FREE_FN = free_fn;
@@ -176,9 +188,15 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void, loghan
     if loghandler_fn.is_none() {
         let timer = OffsetTime::local_rfc_3339();
         if let Err(e) = timer {
-            return opendal_error::new(core::Error::new(core::ErrorKind::Unexpected, format!("{}, {}", e.to_string(), "failed to get local offset")));
+            return opendal_error::new(core::Error::new(
+                core::ErrorKind::Unexpected,
+                format!("{}, {}", e.to_string(), "failed to get local offset"),
+            ));
         }
-        match tracing_subscriber::registry().with(fmt::layer().pretty().with_timer(timer.unwrap())).try_init() {
+        match tracing_subscriber::registry()
+            .with(fmt::layer().pretty().with_timer(timer.unwrap()))
+            .try_init()
+        {
             Ok(_) => std::ptr::null_mut(),
             Err(e) => {
                 unsafe {
@@ -209,9 +227,10 @@ pub extern "C" fn opendal_init_env(alloc: *mut c_void, free: *mut c_void, loghan
 /// TODO
 pub fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
     if path.is_null() {
-        return Err(opendal_error::new(
-            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
-        ));
+        return Err(opendal_error::new(core::Error::new(
+            core::ErrorKind::ConfigInvalid,
+            "invalid args",
+        )));
     }
 
     let c_str = unsafe { std::ffi::CStr::from_ptr(path) };
@@ -634,6 +653,58 @@ pub unsafe extern "C" fn opendal_operator_writer(
     }
 }
 
+/// \brief Blocking create a ob_multipart_writer for the specified path.
+///
+/// ob_multipart_writer is designed to enable writing with a part ID. Although Opendal's
+/// MultipartWriter automatically performs uploads based on buffer conditions, to maintain
+/// compatibilty with ob's existing code logic, it is necessary to expose a method for
+/// uplaoding with a specified part_id.
+///
+/// This function prepares a ob_multipart_writer that can be used to write data to the
+/// specified path using the provided operator. If successful, it returns a valid
+/// ob_multipart_writer; otherwise, it returns an error.
+///
+/// @param op The opendal_operator created previously
+/// @param path The designated path where the writer will be used
+/// @see opendal_operator
+/// @see opendal_result_operator_multipart_writer.
+/// @see opendal_error
+/// @return Returns opendal_result_operator_multipart_writer, containing a multipart_writer
+/// and an opendal_error.
+/// If the operation succeeds, the `multipart_writer` field holds a valid writer and the `error` field
+/// is null. Otherwise, the `multipart_writer` will be null and the `error` will be set correspondingly.
+
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_multipart_writer(
+    op: &opendal_operator,
+    path: *const c_char,
+) -> opendal_result_operator_multipart_writer {
+    let path = match c_char_to_str(path) {
+        Ok(valid_str) => valid_str,
+        Err(e) => {
+            return opendal_result_operator_multipart_writer {
+                multipart_writer: std::ptr::null_mut(),
+                error: e,
+            };
+        }
+    };
+
+    let writer = match op.deref().ob_multipart_writer(path) {
+        Ok(writer) => writer,
+        Err(err) => {
+            return opendal_result_operator_multipart_writer {
+                multipart_writer: std::ptr::null_mut(),
+                error: opendal_error::new(err),
+            }
+        }
+    };
+
+    opendal_result_operator_multipart_writer {
+        multipart_writer: Box::into_raw(Box::new(opendal_multipart_writer::new(writer))),
+        error: std::ptr::null_mut(),
+    }
+}
+
 /// \brief Blocking delete the object in `path`.
 ///
 /// Delete the object in `path` blocking by `op_ptr`.
@@ -692,10 +763,10 @@ pub unsafe extern "C" fn opendal_operator_delete(
 }
 
 /// \brief Blocking put tagging to object in `path`
-/// 
+///
 /// Put tagging to object in `path` blocking by `op_ptr`
 /// Error is NULL if successful, otherwise it contains the error code and error message.
-/// 
+///
 /// @param op The opendal_operator created previously
 /// @param path The designated path you want to put tagging to
 /// @param tagging The tagging you want to put
@@ -706,17 +777,22 @@ pub unsafe extern "C" fn opendal_operator_put_object_tagging(
     tagging: &opendal_object_tagging,
 ) -> *mut opendal_error {
     if path.is_null() {
-        return opendal_error::new(
-            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args")
-        )
+        return opendal_error::new(core::Error::new(
+            core::ErrorKind::ConfigInvalid,
+            "invalid args",
+        ));
     }
 
     let path = std::ffi::CStr::from_ptr(path)
         .to_str()
         .expect("malformed path");
 
-    
-    match op.deref().put_object_tagging_with(path).tag_set(HashMap::from(tagging)).call() {
+    match op
+        .deref()
+        .put_object_tagging_with(path)
+        .tag_set(HashMap::from(tagging))
+        .call()
+    {
         Ok(_) => std::ptr::null_mut(),
         Err(e) => opendal_error::new(e),
     }
@@ -724,17 +800,18 @@ pub unsafe extern "C" fn opendal_operator_put_object_tagging(
 
 //TODO
 #[no_mangle]
-pub unsafe extern "C" fn opendal_operator_get_object_tagging (
+pub unsafe extern "C" fn opendal_operator_get_object_tagging(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_get_object_tagging {
     if path.is_null() {
         return opendal_result_get_object_tagging {
             tagging: opendal_object_tagging::new(),
-            error: opendal_error::new(
-                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid_args")
-            )
-        }
+            error: opendal_error::new(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "invalid_args",
+            )),
+        };
     }
 
     let path = std::ffi::CStr::from_ptr(path)
@@ -749,7 +826,7 @@ pub unsafe extern "C" fn opendal_operator_get_object_tagging (
         Err(e) => opendal_result_get_object_tagging {
             tagging: opendal_object_tagging::new(),
             error: opendal_error::new(e),
-        }
+        },
     }
 }
 
@@ -1001,9 +1078,10 @@ pub unsafe extern "C" fn opendal_operator_list(
     if limit == 0 {
         return opendal_result_list {
             lister: std::ptr::null_mut(),
-            error: opendal_error::new(
-                core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
-            ),
+            error: opendal_error::new(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "invalid args",
+            )),
         };
     }
 
@@ -1031,7 +1109,8 @@ pub unsafe extern "C" fn opendal_operator_list(
         }
     };
 
-    match op.deref()
+    match op
+        .deref()
         .lister_with(path)
         .limit(limit)
         .recursive(recursive)
@@ -1057,7 +1136,7 @@ pub unsafe extern "C" fn opendal_operator_deleter(
     match op.deref().deleter() {
         Ok(deleter) => opendal_result_operator_deleter {
             deleter: Box::into_raw(Box::new(opendal_deleter::new(deleter))),
-            error: std::ptr::null_mut()
+            error: std::ptr::null_mut(),
         },
         Err(e) => opendal_result_operator_deleter {
             deleter: std::ptr::null_mut(),

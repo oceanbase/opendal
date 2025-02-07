@@ -30,16 +30,16 @@
 #include <iostream>
 #include <vector>
 
-class ObDalTestUtil
-{
-};
-
 class ObDalTest : public ::testing::Test 
 {
+public:
+  ObDalTest() {
+    base_path = "obdal_test_" + get_formatted_time() + "/";
+  }
 protected:
   void SetUp() override
   {
-    base_path = "obdal_test_" + get_formatted_time() + "/";
+    
     ObSpan *ob_span = ob_new_span(1, "test-trace");
     ASSERT_NE(nullptr, ob_span);
     ob_span_ = ob_span;

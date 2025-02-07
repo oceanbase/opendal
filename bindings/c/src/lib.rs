@@ -64,6 +64,7 @@ pub use result::opendal_result_stat;
 pub use result::opendal_result_writer_write;
 pub use result::opendal_result_get_object_tagging;
 pub use result::opendal_result_object_tagging_get;
+pub use result::opendal_result_operator_multipart_writer;
 
 mod types;
 pub use types::opendal_bytes;
@@ -78,3 +79,6 @@ pub use reader::opendal_reader;
 
 mod writer;
 pub use writer::opendal_writer;
+
+mod multipart_writer;
+pub use multipart_writer::opendal_multipart_writer;

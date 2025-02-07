@@ -397,7 +397,7 @@ impl Operator {
     /// # use std::sync::Arc;
     /// # use anyhow::Result;
     /// use opendal::layers::LoggingLayer;
-    /// use opendal::services::Fs;
+/// use opendal::services::Fs;
     /// use opendal::Operator;
     ///
     /// # async fn test() -> Result<()> {

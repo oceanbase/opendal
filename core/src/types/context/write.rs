@@ -291,6 +291,41 @@ impl WriteGenerator<oio::BlockingWriter> {
     }
 }
 
+
+// impl WriteGenerator<oio::ObMultipartWriter> {
+//     pub async fn create(ctx: Arc<WriteContext>) -> Result<Self> {
+//         let (chunk_size, exact) = ctx.calculate_chunk_size();
+//         let (_, w) = ctx.acc.write(ctx.path(), ctx.args().clone()).await?;
+
+//         Ok(Self {
+//             w,
+//             chunk_size,
+//             exact,
+//             buffer: oio::QueueBuf::new(),
+//         })
+//     }
+
+//     /// Finish the write process.
+//     pub async fn close(&mut self) -> Result<()> {
+//         loop {
+//             if self.buffer.is_empty() {
+//                 break;
+//             }
+
+//             let buf = self.buffer.take().collect();
+//             self.w.write_dyn(buf).await?;
+//         }
+
+//         self.w.close().await
+//     }
+
+//     /// Abort the write process.
+//     pub async fn abort(&mut self) -> Result<()> {
+//         self.buffer.clear();
+//         self.w.abort().await
+//     }
+// }
+
 #[cfg(test)]
 mod tests {
     use bytes::Buf;

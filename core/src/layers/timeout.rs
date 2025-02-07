@@ -189,7 +189,7 @@ pub struct TimeoutAccessor<A: Access> {
 impl<A: Access> TimeoutAccessor<A> {
     async fn timeout<F: Future<Output = Result<T>>, T>(&self, op: Operation, fut: F) -> Result<T> {
         tokio::time::timeout(self.timeout, fut).await.map_err(|_| {
-            Error::new(ErrorKind::Unexpected, "operation timeout reached")
+            Error::new(ErrorKind::TimedOut, "operation timeout reached")
                 .with_operation(op)
                 .with_context("timeout", self.timeout.as_secs_f64().to_string())
                 .set_temporary()
@@ -204,7 +204,7 @@ impl<A: Access> TimeoutAccessor<A> {
         tokio::time::timeout(self.io_timeout, fut)
             .await
             .map_err(|_| {
-                Error::new(ErrorKind::Unexpected, "io timeout reached")
+                Error::new(ErrorKind::TimedOut, "io timeout reached")
                     .with_operation(op)
                     .with_context("timeout", self.io_timeout.as_secs_f64().to_string())
                     .set_temporary()
@@ -218,6 +218,8 @@ impl<A: Access> LayeredAccess for TimeoutAccessor<A> {
     type BlockingReader = A::BlockingReader;
     type Writer = TimeoutWrapper<A::Writer>;
     type BlockingWriter = A::BlockingWriter;
+    type ObMultipartWriter = TimeoutWrapper<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = A::BlockingObMultipartWriter;
     type Lister = TimeoutWrapper<A::Lister>;
     type BlockingLister = A::BlockingLister;
     type Deleter = TimeoutWrapper<A::Deleter>;
@@ -258,6 +260,23 @@ impl<A: Access> LayeredAccess for TimeoutAccessor<A> {
             .map(|(rp, r)| (rp, TimeoutWrapper::new(r, self.io_timeout)))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        mut args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        if let Some(exec) = args.executor().cloned() {
+            args = args.with_executor(Executor::with(TimeoutExecutor::new(
+                exec.into_inner(),
+                self.io_timeout,
+            )));
+        }
+
+        self.io_timeout(Operation::ObMultipartWrite, self.inner.ob_multipart_write(path, args))
+            .await
+            .map(|(rp, w)| (rp, TimeoutWrapper::new(w, self.io_timeout)))
+    }
+
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
         self.timeout(Operation::Copy, self.inner.copy(from, to, args))
             .await
@@ -296,6 +315,10 @@ impl<A: Access> LayeredAccess for TimeoutAccessor<A> {
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
         self.inner.blocking_write(path, args)
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner.blocking_ob_multipart_write(path, args)
     }
 
     fn blocking_list(&self, path: &str, args: OpList) -> Result<(RpList, Self::BlockingLister)> {
@@ -346,7 +369,7 @@ impl<R> TimeoutWrapper<R> {
         fut: F,
     ) -> Result<T> {
         tokio::time::timeout(timeout, fut).await.map_err(|_| {
-            Error::new(ErrorKind::Unexpected, "io operation timeout reached")
+            Error::new(ErrorKind::TimedOut, "io operation timeout reached")
                 .with_operation(op)
                 .with_context("timeout", timeout.as_secs_f64().to_string())
                 .set_temporary()
@@ -375,6 +398,28 @@ impl<R: oio::Write> oio::Write for TimeoutWrapper<R> {
     async fn abort(&mut self) -> Result<()> {
         let fut = self.inner.abort();
         Self::io_timeout(self.timeout, Operation::WriterAbort.into_static(), fut).await
+    }
+}
+
+impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TimeoutWrapper<R> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        let fut = self.inner.initiate_part();
+        Self::io_timeout(self.timeout, Operation::ObMultipartWriterInitiatePart.into_static(), fut).await
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let fut = self.inner.write_with_part_id(bs, part_id);
+        Self::io_timeout(self.timeout, Operation::ObMultiPartWriterWriteWithPartId.into_static(), fut).await
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        let fut = self.inner.close();
+        Self::io_timeout(self.timeout, Operation::ObMultipartWriterClose.into_static(), fut).await
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        let fut = self.inner.abort();
+        Self::io_timeout(self.timeout, Operation::ObMultipartWriterAbort.into_static(), fut).await
     }
 }
 
@@ -422,9 +467,11 @@ mod tests {
     impl Access for MockService {
         type Reader = MockReader;
         type Writer = ();
+        type ObMultipartWriter = ();
         type Lister = MockLister;
         type BlockingReader = ();
         type BlockingWriter = ();
+        type BlockingObMultipartWriter = ();
         type BlockingLister = ();
         type Deleter = ();
         type BlockingDeleter = ();
