@@ -17,8 +17,9 @@
 
 use ::opendal as core;
 use opendal::Buffer;
-
-use crate::types::opendal_bytes;
+use tracing::error;
+use crate::{handle_result_without_ret, types::opendal_bytes};
+use std::panic::catch_unwind;
 
 /// \brief The error code for all opendal APIs in C binding.
 /// \todo The error handling is not complete, the error with error message will be
@@ -128,8 +129,11 @@ impl opendal_error {
     /// \brief Frees the opendal_error, ok to call on NULL
     #[no_mangle]
     pub unsafe extern "C" fn opendal_error_free(ptr: *mut opendal_error) {
-        if !ptr.is_null() {
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

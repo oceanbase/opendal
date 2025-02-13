@@ -17,6 +17,9 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
+use operator::dump_panic;
 use tracing::{span, span::EnteredSpan, Level};
 
 use super::*;
@@ -61,15 +64,18 @@ impl opendal_bytes {
     /// \brief Frees the heap memory used by the opendal_bytes
     #[no_mangle]
     pub unsafe extern "C" fn opendal_bytes_free(ptr: *mut opendal_bytes) {
-        if !ptr.is_null() {
-            let bs = &mut *ptr;
-            if !bs.data.is_null() {
-                drop(Vec::from_raw_parts(bs.data, bs.len, bs.capacity));
-                bs.data = std::ptr::null_mut();
-                bs.len = 0;
-                bs.capacity = 0;
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                let bs = &mut *ptr;
+                if !bs.data.is_null() {
+                    drop(Vec::from_raw_parts(bs.data, bs.len, bs.capacity));
+                    bs.data = std::ptr::null_mut();
+                    bs.len = 0;
+                    bs.capacity = 0;
+                }
             }
-        }
+        });
+        handle_result_without_ret(ret);
     }
 }
 
@@ -116,7 +122,16 @@ impl opendal_object_tagging {
     ///TODO
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_new() -> *mut Self {
-        Self::new()
+        let ret = catch_unwind(|| {
+            Self::new()
+        });
+        match ret {
+            Ok(tagging) => tagging,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     ///TODO
@@ -126,15 +141,18 @@ impl opendal_object_tagging {
         key: *const c_char,
         value: *const c_char,
     ) {
-        let k = unsafe { std::ffi::CStr::from_ptr(key) }
-            .to_str()
-            .unwrap()
-            .to_string();
-        let v = unsafe { std::ffi::CStr::from_ptr(value) }
-            .to_str()
-            .unwrap()
-            .to_string();
-        self.deref_mut().insert(k, v);
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let k = unsafe { std::ffi::CStr::from_ptr(key) }
+                .to_str()
+                .unwrap()
+                .to_string();
+            let v = unsafe { std::ffi::CStr::from_ptr(value) }
+                .to_str()
+                .unwrap()
+                .to_string();
+            self.deref_mut().insert(k, v);
+        }));
+        handle_result_without_ret(ret);
     }
 
     ///TODO
@@ -143,26 +161,36 @@ impl opendal_object_tagging {
         &mut self,
         key: *const c_char,
     ) -> opendal_result_object_tagging_get {
-        let key = match c_char_to_str(key) {
-            Ok(valid_key) => valid_key,
-            Err(e) => {
-                return opendal_result_object_tagging_get {
-                    value: opendal_bytes::empty(),
-                    error: e,
-                };
-            }
-        };
-
-        if let Some(val) = self.deref().get(key) {
-            return opendal_result_object_tagging_get {
-                value: opendal_bytes::new(Buffer::from(val.clone().into_bytes())),
-                error: std::ptr::null_mut(),
+        let ret = catch_unwind(|| {
+            let key = match c_char_to_str(key) {
+                Ok(valid_key) => valid_key,
+                Err(e) => {
+                    return opendal_result_object_tagging_get {
+                        value: opendal_bytes::empty(),
+                        error: e,
+                    }
+                }
             };
-        }
-        opendal_result_object_tagging_get {
-            value: opendal_bytes::empty(),
-            error: std::ptr::null_mut(),
-        }
+    
+            if let Some(val) = self.deref().get(key) {
+                return opendal_result_object_tagging_get {
+                    value: opendal_bytes::new(Buffer::from(val.clone().into_bytes())),
+                    error: std::ptr::null_mut(),
+                }
+            }
+            opendal_result_object_tagging_get {
+                value: opendal_bytes::empty(),
+                error: std::ptr::null_mut(),
+            }
+        });
+
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_object_tagging_get {
+                value: opendal_bytes::empty(),
+                error,
+            }
+        }        
     }
     ///TODO
     pub fn from_hashmap(hashmap: HashMap<String, String>) -> *mut Self {
@@ -174,10 +202,13 @@ impl opendal_object_tagging {
     ///TODO
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_free(ptr: *mut opendal_object_tagging) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }
 
@@ -225,11 +256,20 @@ impl opendal_operator_options {
     /// @see opendal_operator_option_set
     #[no_mangle]
     pub extern "C" fn opendal_operator_options_new() -> *mut Self {
-        let map: HashMap<String, String> = HashMap::default();
-        let options = Self {
-            inner: Box::into_raw(Box::new(map)) as _,
-        };
-        Box::into_raw(Box::new(options))
+        let ret = catch_unwind(|| {
+            let map: HashMap<String, String> = HashMap::default();
+            let options = Self {
+                inner: Box::into_raw(Box::new(map)) as _,
+            };
+            Box::into_raw(Box::new(options))
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Set a Key-Value pair inside opendal_operator_options
@@ -255,24 +295,30 @@ impl opendal_operator_options {
         key: *const c_char,
         value: *const c_char,
     ) {
-        let k = unsafe { std::ffi::CStr::from_ptr(key) }
-            .to_str()
-            .unwrap()
-            .to_string();
-        let v = unsafe { std::ffi::CStr::from_ptr(value) }
-            .to_str()
-            .unwrap()
-            .to_string();
-        self.deref_mut().insert(k, v);
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let k = unsafe { std::ffi::CStr::from_ptr(key) }
+                .to_str()
+                .unwrap()
+                .to_string();
+            let v = unsafe { std::ffi::CStr::from_ptr(value) }
+                .to_str()
+                .unwrap()
+                .to_string();
+            self.deref_mut().insert(k, v);
+        }));
+        handle_result_without_ret(ret);
     }
 
     /// \brief Free the allocated memory used by [`opendal_operator_options`]
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_options_free(ptr: *mut opendal_operator_options) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut HashMap<String, String>));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }
 
@@ -312,25 +358,37 @@ impl Drop for ObSpan {
 
 #[no_mangle]
 pub extern "C" fn ob_new_span(tenant_id: u64, trace_id: *const c_char) -> *mut ObSpan {
-    if trace_id.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    let c_str = unsafe { CStr::from_ptr(trace_id) };
-    match c_str.to_str() {
-        Ok(trace_id_str) => {
-            let my_span = ObSpan::new(tenant_id, trace_id_str);
-            Box::into_raw(Box::new(my_span))
+    let ret = catch_unwind(|| {
+        if trace_id.is_null() {
+            return std::ptr::null_mut();
         }
-        Err(_) => std::ptr::null_mut(),
+    
+        let c_str = unsafe { CStr::from_ptr(trace_id) };
+        match c_str.to_str() {
+            Ok(trace_id_str) => {
+                let my_span = ObSpan::new(tenant_id, trace_id_str);
+                Box::into_raw(Box::new(my_span))
+            }
+            Err(_) => std::ptr::null_mut(),
+        }
+    });
+    match ret {
+        Ok(r) => r,
+        Err(err) => {
+            dump_panic(err);
+            std::ptr::null_mut()
+        }
     }
 }
 
 #[no_mangle]
 pub extern "C" fn ob_drop_span(span: *mut ObSpan) {
-    if !span.is_null() {
-        unsafe {
-            let _ = Box::from_raw(span);
+    let ret = catch_unwind(|| {
+        if !span.is_null() {
+            unsafe {
+                let _ = Box::from_raw(span);
+            }
         }
-    }
+    });
+    handle_result_without_ret(ret);
 }

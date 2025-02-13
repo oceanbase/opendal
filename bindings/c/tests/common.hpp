@@ -39,7 +39,7 @@ static constexpr char secret_access_key[] = "xxx";
 
 extern "C" void ob_log_handler(const char *level, const char *message) 
 {
-  std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
+  // std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
 }
 
 void *my_alloc(size_t size, size_t align) 
@@ -61,6 +61,7 @@ int strcmp(const opendal_bytes &bytes, const char *str)
 {
   if (str == nullptr) {
     std::cerr << "str should not be null" << std::endl;
+    return -1;
   }
   int i = 0;
   while (i < bytes.len && *(str + i) != '\0') {
@@ -147,10 +148,14 @@ void shuffle_vec(std::vector<T> &vec)
 }
 
 // select sz numbers from the range [l, r]
-bool select_random_numbers(int64_t l, int64_t r, size_t sz, std::vector<int64_t> &selected)
+bool select_random_numbers(
+    const int64_t l, 
+    const int64_t r, 
+    const size_t sz, 
+    std::vector<int64_t> &selected)
 {
   if (l > r || sz > r - l + 1) {
-    std::cerr << "Error: k is large than the nunmber of available elements in the range." << std::endl;
+    std::cerr << "Error: sz is large than the nunmber of available elements in the range." << std::endl;
     return false;
   }
 
@@ -171,9 +176,13 @@ bool select_random_numbers(int64_t l, int64_t r, size_t sz, std::vector<int64_t>
 // eages:
 //      divide [0, 9] into 5 parts evenly
 //      [0, 2), [2, 4), [4, 6), [6, 8), [8, 10)
-bool divide_interval_evenly(int64_t l, int64_t r, size_t sz, std::vector<std::tuple<int64_t, int64_t, int64_t>> &ranges)
+bool divide_interval_evenly(
+    const int64_t l, 
+    const int64_t r, 
+    const size_t sz, 
+    std::vector<std::tuple<int64_t, int64_t, int64_t>> &ranges)
 {
-  if (l > r || (r - l + 1) % sz != 0) {
+  if (sz == 0 || l > r || (r - l + 1) % sz != 0) {
     std::cerr << "Invalid argument!" << ' ' << l << ' ' << r << ' ' << sz << std::endl;
     return false;
   }
@@ -191,7 +200,7 @@ bool divide_interval_evenly(int64_t l, int64_t r, size_t sz, std::vector<std::tu
 
 
 // dump the opendal error
-void dump_error(opendal_error *error) 
+void dump_error(const opendal_error *error) 
 {
   if (error != nullptr) {
     std::cout << "[ERRCODE: " << error->code << " ]" 

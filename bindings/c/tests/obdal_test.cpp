@@ -470,9 +470,9 @@ TEST_F(ObDalTest, test_multipart)
 
     error = opendal_writer_close(writer);
     ASSERT_TRUE(error);
-    opendal_error_free(error);
+    free_error(error);
 
-    opendal_error_free(r_writer_write.error);
+    free_error(r_writer_write.error);
     free(data_str);
     opendal_writer_free(writer);
   }
@@ -535,6 +535,13 @@ TEST_F(ObDalTest, test_ob_multipart)
   free(data_str);
 }
 
+TEST_F(ObDalTest, test_catch_panic)
+{
+  opendal_error *error = opendal_panic_test();
+  ASSERT_TRUE(error);
+  dump_error(error);
+  free_error(error);
+}
 int main(int argc, char **argv) 
 {
   ::testing::InitGoogleTest(&argc, argv);

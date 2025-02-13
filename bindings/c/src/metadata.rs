@@ -17,6 +17,10 @@
 
 use ::opendal as core;
 use std::ffi::c_void;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use crate::handle_result_without_ret;
+use crate::operator::dump_panic;
 
 /// \brief Carries all metadata associated with a **path**.
 ///
@@ -54,10 +58,13 @@ impl opendal_metadata {
     /// \brief Free the heap-allocated metadata used by opendal_metadata
     #[no_mangle]
     pub unsafe extern "C" fn opendal_metadata_free(ptr: *mut opendal_metadata) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::Metadata));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::Metadata));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 
     /// \brief Return the content_length of the metadata
@@ -73,7 +80,16 @@ impl opendal_metadata {
     /// ```
     #[no_mangle]
     pub extern "C" fn opendal_metadata_content_length(&self) -> u64 {
-        self.deref().content_length()
+        let ret = catch_unwind(|| {
+            self.deref().content_length()
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                u64::default()
+            }
+        }
     }
 
     /// \brief Return whether the path represents a file
@@ -89,7 +105,16 @@ impl opendal_metadata {
     /// ```
     #[no_mangle]
     pub extern "C" fn opendal_metadata_is_file(&self) -> bool {
-        self.deref().is_file()
+        let ret = catch_unwind(|| {
+            self.deref().is_file()
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                false
+            }
+        }
     }
 
     /// \brief Return whether the path represents a directory
@@ -110,7 +135,16 @@ impl opendal_metadata {
     /// after we support opendal_operator_mkdir()
     #[no_mangle]
     pub extern "C" fn opendal_metadata_is_dir(&self) -> bool {
-        self.deref().is_dir()
+        let ret = catch_unwind(|| {
+            self.deref().is_dir()
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                false
+            }
+        }
     }
 
     /// \brief Return the last_modified of the metadata, in milliseconds
@@ -126,10 +160,19 @@ impl opendal_metadata {
     /// ```
     #[no_mangle]
     pub extern "C" fn opendal_metadata_last_modified_ms(&self) -> i64 {
-        let mtime = self.deref().last_modified();
-        match mtime {
-            None => -1,
-            Some(time) => time.timestamp_millis(),
+        let ret = catch_unwind(|| {
+            let mtime = self.deref().last_modified();
+            match mtime {
+                None => -1,
+                Some(time) => time.timestamp_millis(),
+            }
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                -1
+            }
         }
     }
 }

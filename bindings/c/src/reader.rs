@@ -16,6 +16,8 @@
 // under the License.
 
 use std::ffi::c_void;
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
 
 use ::opendal as core;
 
@@ -55,56 +57,68 @@ impl opendal_reader {
         len: usize,
         offset: usize,
     ) -> opendal_result_reader_read {
-        if buf.is_null() || len == 0 {
-            return opendal_result_reader_read {
-                size: 0,
-                error: opendal_error::new(
-                    core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
-                ),
-            };
-        }
-
-        let range = (offset as u64)..((offset + len) as u64);
-        match self.deref_mut().read(range) {
-            Ok(buffer) => {
-                let read_len = buffer.len();
-                if read_len > len {
-                    return opendal_result_reader_read {
-                        size: 0,
-                        error: opendal_error::new(
-                            core::Error::new(
-                                core::ErrorKind::Unexpected, 
-                                "returned data is larger than expected"
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            if buf.is_null() || len == 0 {
+                return opendal_result_reader_read {
+                    size: 0,
+                    error: opendal_error::new(
+                        core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args"),
+                    ),
+                };
+            }
+    
+            let range = (offset as u64)..((offset + len) as u64);
+            match self.deref_mut().read(range) {
+                Ok(buffer) => {
+                    let read_len = buffer.len();
+                    if read_len > len {
+                        return opendal_result_reader_read {
+                            size: 0,
+                            error: opendal_error::new(
+                                core::Error::new(
+                                    core::ErrorKind::Unexpected, 
+                                    "returned data is larger than expected"
+                                ),
                             ),
-                        ),
-                    };
-                }
-
-                unsafe {
-                    let bytes = buffer.to_bytes();
-                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, read_len);
-                }
-                opendal_result_reader_read {
-                    size: read_len,
-                    error: std::ptr::null_mut(),
-                }
-            },
-            Err(e) => opendal_result_reader_read {
+                        };
+                    }
+    
+                    unsafe {
+                        let bytes = buffer.to_bytes();
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, read_len);
+                    }
+                    opendal_result_reader_read {
+                        size: read_len,
+                        error: std::ptr::null_mut(),
+                    }
+                },
+                Err(e) => opendal_result_reader_read {
+                    size: 0,
+                    error: opendal_error::new(
+                        core::Error::new(core::ErrorKind::Unexpected, "read failed from reader")
+                            .set_source(e),
+                    ),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_reader_read {
                 size: 0,
-                error: opendal_error::new(
-                    core::Error::new(core::ErrorKind::Unexpected, "read failed from reader")
-                        .set_source(e),
-                ),
-            },
+                error,
+            }
         }
     }
 
     /// \brief Frees the heap memory used by the opendal_reader.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_reader_free(ptr: *mut opendal_reader) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingReader));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingReader));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

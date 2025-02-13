@@ -1509,6 +1509,8 @@ struct opendal_error *opendal_operator_copy(const struct opendal_operator *op,
                                             const char *src,
                                             const char *dest);
 
+struct opendal_error *opendal_panic_test(void);
+
 /**
  * \brief Get information of underlying accessor.
  *

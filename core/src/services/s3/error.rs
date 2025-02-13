@@ -93,10 +93,18 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     if code == "InvalidRequest" && msg.contains("x-amz-checksum") {
         return Some((ErrorKind::ChecksumError, false))
     }
+    // in virtual-hosted mode, Invalid Request is returned when use obdal to access
+    // cos with a wrong bucket name.
+    if code == "InvalidRequest" && msg.contains("<bucketname>-<appid>") {
+        return Some((ErrorKind::InvalidObjectStorageEndpoint, false))
+    }
     match code {
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         "KeyTooLongError" => Some((ErrorKind::ConfigInvalid, false)),
+        // when use obdal to access cos with a uri that exceeds
+        // the allowed length, an InvalidURI error is returnd.
+        "InvalidURI" => Some((ErrorKind::ConfigInvalid, false)),
         // > Your socket connection to the server was not read from
         // > or written to within the timeout period."
         //

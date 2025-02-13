@@ -33,7 +33,8 @@
 class ObDalTest : public ::testing::Test 
 {
 public:
-  ObDalTest() {
+  ObDalTest() 
+  {
     base_path = "obdal_test_" + get_formatted_time() + "/";
   }
 protected:
