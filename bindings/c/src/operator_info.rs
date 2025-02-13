@@ -17,11 +17,12 @@
 
 use std::ffi::CString;
 use std::ffi::{c_char, c_void};
+use std::panic::catch_unwind;
 use tracing::warn;
 
 use ::opendal as core;
 
-use crate::opendal_operator;
+use crate::{dump_panic, handle_result, handle_result_without_ret, opendal_operator};
 
 /// \brief Metadata for **operator**, users can use this metadata to get information
 /// of operator.
@@ -43,6 +44,7 @@ impl opendal_operator_info {
 /// \brief Capability is used to describe what operations are supported
 /// by current Operator.
 #[repr(C)]
+#[derive(Default)]
 pub struct opendal_capability {
     /// If operator supports stat.
     pub stat: bool,
@@ -153,19 +155,31 @@ impl opendal_operator_info {
     /// ```
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_new(op: &opendal_operator) -> *mut Self {
-        let info = op.deref().info();
-        Box::into_raw(Box::new(Self {
-            inner: Box::into_raw(Box::new(info)) as _,
-        }))
+        let ret = catch_unwind(|| {
+            let info = op.deref().info();
+            Box::into_raw(Box::new(Self {
+                inner: Box::into_raw(Box::new(info)) as _,
+            }))
+        });
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Free the heap-allocated opendal_operator_info
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_free(ptr: *mut Self) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::OperatorInfo));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::OperatorInfo));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 
     /// \brief Return the nul-terminated operator's scheme, i.e. service
@@ -173,11 +187,21 @@ impl opendal_operator_info {
     /// \note: The string is on heap, remember to free it
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_scheme(&self) -> *mut c_char {
-        let scheme = self.deref().scheme().into_static();
-        match CString::new(scheme) {
-            Ok(cstring) => cstring.into_raw(),
-            Err(_) => {
-                warn!("fail to convert to CString, scheme: {:?}", scheme);
+        let ret = catch_unwind(|| {
+            let scheme = self.deref().scheme().into_static();
+            match CString::new(scheme) {
+                Ok(cstring) => cstring.into_raw(),
+                Err(_) => {
+                    warn!("fail to convert to CString, scheme: {:?}", scheme);
+                    std::ptr::null_mut()
+                }
+            }
+        });
+        
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                dump_panic(err);
                 std::ptr::null_mut()
             }
         }
@@ -188,11 +212,20 @@ impl opendal_operator_info {
     /// \note: The string is on heap, remember to free it
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_root(&self) -> *mut c_char {
-        let root = self.deref().root();
-        match CString::new(root) {
-            Ok(cstring) => cstring.into_raw(),
-            Err(_) => {
-                warn!("fail to convert to CString, root: {:?}", root);
+        let ret = catch_unwind(|| {
+            let root = self.deref().root();
+            match CString::new(root) {
+                Ok(cstring) => cstring.into_raw(),
+                Err(_) => {
+                    warn!("fail to convert to CString, root: {:?}", root);
+                    std::ptr::null_mut()
+                }
+            }
+        });
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                dump_panic(err);
                 std::ptr::null_mut()
             }
         }
@@ -204,11 +237,20 @@ impl opendal_operator_info {
     /// \note: The string is on heap, remember to free it
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_info_get_name(&self) -> *mut c_char {
-        let name = self.deref().name();
-        match CString::new(name) {
-            Ok(cstring) => cstring.into_raw(),
-            Err(_) => {
-                warn!("fail to convert to CString, name: {:?}", name);
+        let ret = catch_unwind(|| {
+            let name = self.deref().name();
+            match CString::new(name) {
+                Ok(cstring) => cstring.into_raw(),
+                Err(_) => {
+                    warn!("fail to convert to CString, name: {:?}", name);
+                    std::ptr::null_mut()
+                }
+            }
+        });
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                dump_panic(err);
                 std::ptr::null_mut()
             }
         }
@@ -219,8 +261,18 @@ impl opendal_operator_info {
     pub unsafe extern "C" fn opendal_operator_info_get_full_capability(
         &self,
     ) -> opendal_capability {
-        let cap = self.deref().full_capability();
-        cap.into()
+        let ret = catch_unwind(|| {
+            let cap = self.deref().full_capability();
+            cap.into()
+        });
+
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                dump_panic(err);
+                opendal_capability::default()
+            }
+        }
     }
 
     /// \brief Return the operator's native capability
@@ -228,8 +280,17 @@ impl opendal_operator_info {
     pub unsafe extern "C" fn opendal_operator_info_get_native_capability(
         &self,
     ) -> opendal_capability {
-        let cap = self.deref().native_capability();
-        cap.into()
+        let ret = catch_unwind(|| {
+            let cap = self.deref().native_capability();
+            cap.into()
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                opendal_capability::default()
+            }
+        }
     }
 }
 

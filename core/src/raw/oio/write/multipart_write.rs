@@ -134,6 +134,7 @@ pub struct MultipartWriter<W: MultipartWrite> {
     parts: Vec<MultipartPart>,
     cache: Option<Buffer>,
     next_part_number: usize,
+    part_counts: usize,
 
     tasks: ConcurrentTasks<WriteInput<W>, MultipartPart>,
 }
@@ -153,6 +154,7 @@ impl<W: MultipartWrite> MultipartWriter<W> {
             parts: Vec::new(),
             cache: None,
             next_part_number: 0,
+            part_counts: 0,
 
             tasks: ConcurrentTasks::new(executor, concurrent, |input| {
                 Box::pin({
@@ -323,8 +325,8 @@ where
                 bytes,
             })
             .await?;
-        // next_part_number indicates the number of parts that have currently been written.
-        self.next_part_number += 1;
+        // part_counts indicates the number of parts that have currently been written.
+        self.part_counts += 1;
         Ok(())
     }
 
@@ -338,12 +340,12 @@ where
             self.parts.push(result)
         }
 
-        if self.parts.len() != self.next_part_number {
+        if self.parts.len() != self.part_counts {
             return Err(Error::new(
                 ErrorKind::Unexpected,
-                "multipart part numbers mismatch, please report bug to opendal",
+                "multipart part numbers mismatch, please report bug to obdal",
             )
-            .with_context("expected", self.next_part_number)
+            .with_context("expected", self.part_counts)
             .with_context("actual", self.parts.len())
             .with_context("upload_id", upload_id));
         }

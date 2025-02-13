@@ -454,17 +454,6 @@ impl<F: Future<Output = Result<Writer>>> FutureWriter<F> {
 pub type FutureObMultipartWriter<F> = OperatorFuture<(OpWrite, OpWriter), ObMultipartWriter, F>;
 
 impl<F: Future<Output = Result<ObMultipartWriter>>> FutureObMultipartWriter<F> {
-    /// Set the append mode of op.
-    ///
-    /// If the append mode is set, the data will be appended to the end of the file.
-    ///
-    /// ## Notes
-    ///
-    /// Service could return `Unsupported` if the underlying storage does not support append.
-    pub fn append(self, v: bool) -> Self {
-        self.map(|(args, options)| (args.with_append(v), options))
-    }
-
     /// Set the chunk size of op.
     ///
     /// If chunk size is set, the data will be chunked by the underlying writer.

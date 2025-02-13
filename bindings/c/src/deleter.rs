@@ -19,6 +19,7 @@ use ::opendal as core;
 use result::{opendal_result_deleter_deleted, opendal_result_deleter_flush};
 use std::ffi::c_void;
 use std::os::raw::c_char;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::*;
 
@@ -54,16 +55,22 @@ impl opendal_deleter {
         &mut self,
         path: *const c_char,
     ) -> *mut opendal_error {
-        let path = match c_char_to_str(path) {
-            Ok(valid_str) => valid_str,
-            Err(e) => {
-                return e;
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let path = match c_char_to_str(path) {
+                Ok(valid_str) => valid_str,
+                Err(e) => {
+                    return e;
+                }
+            };
+    
+            match self.deref_mut().delete(path) {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
             }
-        };
-
-        match self.deref_mut().delete(path) {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
         }
     }
 
@@ -73,23 +80,32 @@ impl opendal_deleter {
         &mut self,
         path: *const c_char,
     ) -> opendal_result_deleter_deleted {
-        let path = match c_char_to_str(path) {
-            Ok(valid_str) => valid_str,
-            Err(e) => {
-                return opendal_result_deleter_deleted {
-                    deleted: false,
-                    error: e,
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let path = match c_char_to_str(path) {
+                Ok(valid_str) => valid_str,
+                Err(e) => {
+                    return opendal_result_deleter_deleted {
+                        deleted: false,
+                        error: e,
+                    }
                 }
+            };
+            match self.deref_mut().deleted(path) {
+                Ok(deleted) => opendal_result_deleter_deleted {
+                    deleted,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_deleter_deleted {
+                    deleted: false,
+                    error: opendal_error::new(e),
+                },
             }
-        };
-        match self.deref_mut().deleted(path) {
-            Ok(deleted) => opendal_result_deleter_deleted {
-                deleted,
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_deleter_deleted {
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_deleter_deleted {
                 deleted: false,
-                error: opendal_error::new(e),
+                error,
             },
         }
     }
@@ -97,24 +113,36 @@ impl opendal_deleter {
     /// \brief delete all the paths in the deleter.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_deleter_flush(&mut self) -> opendal_result_deleter_flush {
-        match self.deref_mut().flush() {
-            Ok(deleted) => opendal_result_deleter_flush {
-                deleted,
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_deleter_flush {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().flush() {
+                Ok(deleted) => opendal_result_deleter_flush {
+                    deleted,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_deleter_flush {
+                    deleted: 0,
+                    error: opendal_error::new(e),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_deleter_flush {
                 deleted: 0,
-                error: opendal_error::new(e),
-            },
+                error,
+            }
         }
     }
 
     /// \brief Free the heap-allocated metadata used by opendal_lister
     #[no_mangle]
     pub unsafe extern "C" fn opendal_deleter_free(ptr: *mut opendal_deleter) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingDeleter));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingDeleter));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

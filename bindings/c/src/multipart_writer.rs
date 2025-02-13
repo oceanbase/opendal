@@ -17,6 +17,8 @@
 
 use ::opendal as core;
 use std::ffi::c_void;
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
 
 use super::*;
 
@@ -50,9 +52,15 @@ impl opendal_multipart_writer {
     pub unsafe extern "C" fn opendal_multipart_writer_initiate(
         &mut self,
     ) -> *mut opendal_error {
-        match self.deref_mut().initiate_part() {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().initiate_part() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
         }
     }
 
@@ -63,42 +71,63 @@ impl opendal_multipart_writer {
         bytes: &opendal_bytes,
         part_id: usize,
     ) -> opendal_result_writer_write {
-        let size = bytes.len;
-        // Similar to opendal_writer_write, it is necessary to copy byte here.
-        let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
-        match self.deref_mut().write_with_part_id(copy_bytes, part_id) {
-            Ok(()) => opendal_result_writer_write {
-                size,
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_writer_write {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let size = bytes.len;
+            // Similar to opendal_writer_write, it is necessary to copy byte here.
+            let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
+            match self.deref_mut().write_with_part_id(copy_bytes, part_id) {
+                Ok(()) => opendal_result_writer_write {
+                    size,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_writer_write {
+                    size: 0,
+                    error: opendal_error::new(
+                        core::Error::new(
+                            core::ErrorKind::Unexpected,
+                            "write failed from multipart writer",
+                        )
+                        .set_source(e),
+                    ),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_writer_write {
                 size: 0,
-                error: opendal_error::new(
-                    core::Error::new(
-                        core::ErrorKind::Unexpected,
-                        "write failed from multipart writer",
-                    )
-                    .set_source(e),
-                ),
-            },
+                error,
+            }
         }
     }
 
     /// \brief Abort the pending multipart writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_multipart_writer_abort(&mut self) -> *mut opendal_error {
-        match self.deref_mut().abort() {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().abort() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
         }
     }
 
     /// \brief close the multipart writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_multipart_writer_close(&mut self) -> *mut opendal_error {
-        match self.deref_mut().close() {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().close() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
         }
     }
 
@@ -106,9 +135,12 @@ impl opendal_multipart_writer {
     /// \note This function make sure all data have been stored.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_multipart_writer_free(ptr: *mut opendal_multipart_writer) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingObMultipartWriter));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingObMultipartWriter));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

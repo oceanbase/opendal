@@ -46,6 +46,9 @@ pub use metadata::opendal_metadata;
 mod operator;
 pub use operator::opendal_operator;
 pub use operator::c_char_to_str;
+pub use operator::handle_result;
+pub use operator::handle_result_without_ret;
+pub use operator::dump_panic;
 
 mod operator_info;
 

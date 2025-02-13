@@ -16,7 +16,7 @@
 // under the License.
 
 use ::opendal as core;
-use std::ffi::c_void;
+use std::{ffi::c_void, panic::catch_unwind, panic::AssertUnwindSafe};
 
 use super::*;
 
@@ -51,42 +51,63 @@ impl opendal_writer {
         &mut self,
         bytes: &opendal_bytes,
     ) -> opendal_result_writer_write {
-        let size = bytes.len;
-        // Since the write method will consume the buffer, and the buffer passed 
-        // in from outside needs to be released externally, in order to adhere to 
-        // the principle of "who allocates, releases," it is necessary to copy the 
-        // contents of bytes here.
-        let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
-        match self.deref_mut().write(copy_bytes) {
-            Ok(()) => opendal_result_writer_write {
-                size,
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_writer_write {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let size = bytes.len;
+            // Since the write method will consume the buffer, and the buffer passed 
+            // in from outside needs to be released externally, in order to adhere to 
+            // the principle of "who allocates, releases," it is necessary to copy the 
+            // contents of bytes here.
+            let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
+            match self.deref_mut().write(copy_bytes) {
+                Ok(()) => opendal_result_writer_write {
+                    size,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_writer_write {
+                    size: 0,
+                    error: opendal_error::new(
+                        core::Error::new(core::ErrorKind::Unexpected, "write failed from writer")
+                            .set_source(e),
+                    ),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_writer_write {
                 size: 0,
-                error: opendal_error::new(
-                    core::Error::new(core::ErrorKind::Unexpected, "write failed from writer")
-                        .set_source(e),
-                ),
-            },
+                error,
+            }
         }
     }
 
     /// \brief Abort the pending writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_writer_abort(&mut self) -> *mut opendal_error {
-        match self.deref_mut().abort() {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().abort() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error, 
         }
     }
 
     /// \brief close the writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_writer_close(&mut self) -> *mut opendal_error {
-        match self.deref_mut().close() {
-            Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().close() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error, 
         }
     }
 
@@ -94,9 +115,12 @@ impl opendal_writer {
     /// \note This function make sure all data have been stored.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_writer_free(ptr: *mut opendal_writer) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingWriter));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingWriter));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }
