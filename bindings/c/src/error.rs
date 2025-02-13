@@ -17,8 +17,9 @@
 
 use ::opendal as core;
 use opendal::Buffer;
-
-use crate::types::opendal_bytes;
+use tracing::error;
+use crate::{handle_result_without_ret, types::opendal_bytes};
+use std::panic::catch_unwind;
 
 /// \brief The error code for all opendal APIs in C binding.
 /// \todo The error handling is not complete, the error with error message will be
@@ -56,6 +57,8 @@ pub enum opendal_code {
     OPENDAL_CHECKSUM_ERROR,
     /// OpenDal returns this error to indicate that the region is not correct.
     OPENDAL_REGION_MISMATCH,
+    /// The operation is timed out.
+    OPENDAL_TIMED_OUT,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -76,6 +79,7 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::InvalidObjectStorageEndpoint => opendal_code::OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
             core::ErrorKind::ChecksumError => opendal_code::OPENDAL_CHECKSUM_ERROR,
             core::ErrorKind::RegionMismatch => opendal_code::OPENDAL_REGION_MISMATCH,
+            core::ErrorKind::TimedOut => opendal_code::OPENDAL_TIMED_OUT,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
@@ -125,8 +129,11 @@ impl opendal_error {
     /// \brief Frees the opendal_error, ok to call on NULL
     #[no_mangle]
     pub unsafe extern "C" fn opendal_error_free(ptr: *mut opendal_error) {
-        if !ptr.is_null() {
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

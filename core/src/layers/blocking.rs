@@ -166,6 +166,8 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
     type BlockingReader = BlockingWrapper<A::Reader>;
     type Writer = A::Writer;
     type BlockingWriter = BlockingWrapper<A::Writer>;
+    type ObMultipartWriter = A::ObMultipartWriter;
+    type BlockingObMultipartWriter = BlockingWrapper<A::ObMultipartWriter>;
     type Lister = A::Lister;
     type BlockingLister = BlockingWrapper<A::Lister>;
     type Deleter = A::Deleter;
@@ -191,6 +193,10 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
         self.inner.write(path, args).await
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner.ob_multipart_write(path, args).await
     }
 
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
@@ -250,6 +256,14 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
             let (rp, writer) = self.inner.write(path, args).await?;
             let blocking_writer = Self::BlockingWriter::new(self.handle.clone(), writer);
             Ok((rp, blocking_writer))
+        })
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.handle.block_on(async {
+            let (rp, multipart_writer) = self.inner.ob_multipart_write(path, args).await?;
+            let blocking_ob_multipart_writer = Self::BlockingObMultipartWriter::new(self.handle.clone(), multipart_writer);
+            Ok((rp, blocking_ob_multipart_writer))
         })
     }
 
@@ -317,6 +331,24 @@ impl<I: oio::Read + 'static> oio::BlockingRead for BlockingWrapper<I> {
 impl<I: oio::Write + 'static> oio::BlockingWrite for BlockingWrapper<I> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
         self.handle.block_on(self.inner.write(bs))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.close())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.abort())
+    }
+}
+
+impl<I: oio::ObMultipartWrite + 'static> oio::BlockingObMultipartWrite for BlockingWrapper<I> {
+    fn initiate_part(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.initiate_part())
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        self.handle.block_on(self.inner.write_with_part_id(bs, part_id))
     }
 
     fn close(&mut self) -> Result<()> {

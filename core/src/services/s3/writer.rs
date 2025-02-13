@@ -134,7 +134,7 @@ impl oio::MultipartWrite for S3Writer {
     }
 
     async fn complete_part(&self, upload_id: &str, parts: &[oio::MultipartPart]) -> Result<()> {
-        let parts = parts
+        let mut parts: Vec<_> = parts
             .iter()
             .map(|p| match &self.core.checksum_algorithm {
                 None => CompleteMultipartUploadRequestPart {
@@ -151,6 +151,8 @@ impl oio::MultipartWrite for S3Writer {
                 },
             })
             .collect();
+        
+        parts.sort_by(|lth, rth| lth.part_number.cmp(&rth.part_number));
 
         let resp = self
             .core

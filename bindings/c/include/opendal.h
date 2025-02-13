@@ -92,6 +92,10 @@ typedef enum opendal_code {
    * OpenDal returns this error to indicate that the region is not correct.
    */
   OPENDAL_REGION_MISMATCH,
+  /**
+   * The operation is timed out.
+   */
+  OPENDAL_TIMED_OUT,
 } opendal_code;
 
 /**
@@ -389,6 +393,35 @@ typedef struct opendal_result_operator_writer {
    */
   struct opendal_error *error;
 } opendal_result_operator_writer;
+
+/**
+ * \brief The result type returned by opendal's ob_multipart_writer operation.
+ * \note The opendal_multipart_writer actually owns a pointer to
+ * an opendal::BlockingObMultipartWriter, which is inside the Rust core code.
+ */
+typedef struct opendal_multipart_writer {
+  /**
+   * The pointer to the opendal::BlockingObMultipartWriter in the Rust code.
+   * Only touch this on judging whether it is NULL.
+   */
+  void *inner;
+} opendal_multipart_writer;
+
+/**
+ * \brief The result type returned by opendal_operator_multipart_writer().
+ * The result type for opendal_operator_multipart_writer(), the field `multipart_writer` contains the writer
+ * of the path, which is an iterator of the objects under the path.
+ */
+typedef struct opendal_result_operator_multipart_writer {
+  /**
+   * The pointer for opendal_multipart_writer
+   */
+  struct opendal_multipart_writer *multipart_writer;
+  /**
+   * The error, if ok, it is null
+   */
+  struct opendal_error *error;
+} opendal_result_operator_multipart_writer;
 
 /**
  * TODO
@@ -1072,6 +1105,31 @@ struct opendal_result_operator_writer opendal_operator_writer(const struct opend
                                                               const char *path);
 
 /**
+ * \brief Blocking create a ob_multipart_writer for the specified path.
+ *
+ * ob_multipart_writer is designed to enable writing with a part ID. Although Opendal's
+ * MultipartWriter automatically performs uploads based on buffer conditions, to maintain
+ * compatibilty with ob's existing code logic, it is necessary to expose a method for
+ * uplaoding with a specified part_id.
+ *
+ * This function prepares a ob_multipart_writer that can be used to write data to the
+ * specified path using the provided operator. If successful, it returns a valid
+ * ob_multipart_writer; otherwise, it returns an error.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The designated path where the writer will be used
+ * @see opendal_operator
+ * @see opendal_result_operator_multipart_writer.
+ * @see opendal_error
+ * @return Returns opendal_result_operator_multipart_writer, containing a multipart_writer
+ * and an opendal_error.
+ * If the operation succeeds, the `multipart_writer` field holds a valid writer and the `error` field
+ * is null. Otherwise, the `multipart_writer` will be null and the `error` will be set correspondingly.
+ */
+struct opendal_result_operator_multipart_writer opendal_operator_multipart_writer(const struct opendal_operator *op,
+                                                                                  const char *path);
+
+/**
  * \brief Blocking delete the object in `path`.
  *
  * Delete the object in `path` blocking by `op_ptr`.
@@ -1451,6 +1509,8 @@ struct opendal_error *opendal_operator_copy(const struct opendal_operator *op,
                                             const char *src,
                                             const char *dest);
 
+struct opendal_error *opendal_panic_test(void);
+
 /**
  * \brief Get information of underlying accessor.
  *
@@ -1628,7 +1688,7 @@ struct opendal_result_writer_write opendal_writer_write(struct opendal_writer *s
                                                         const struct opendal_bytes *bytes);
 
 /**
- * Abort the pending writer.
+ * \brief Abort the pending writer.
  */
 struct opendal_error *opendal_writer_abort(struct opendal_writer *self);
 
@@ -1642,6 +1702,34 @@ struct opendal_error *opendal_writer_close(struct opendal_writer *self);
  * \note This function make sure all data have been stored.
  */
 void opendal_writer_free(struct opendal_writer *ptr);
+
+/**
+ * \brief Initiate the multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_initiate(struct opendal_multipart_writer *self);
+
+/**
+ * \brief Write data with part id to the multipart writer.
+ */
+struct opendal_result_writer_write opendal_multipart_writer_write(struct opendal_multipart_writer *self,
+                                                                  const struct opendal_bytes *bytes,
+                                                                  uintptr_t part_id);
+
+/**
+ * \brief Abort the pending multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_abort(struct opendal_multipart_writer *self);
+
+/**
+ * \brief close the multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_close(struct opendal_multipart_writer *self);
+
+/**
+ * \brief Frees the heap memory used by the opendal_multipart_writer.
+ * \note This function make sure all data have been stored.
+ */
+void opendal_multipart_writer_free(struct opendal_multipart_writer *ptr);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -66,10 +66,12 @@ where
 impl<S: Adapter> Access for Backend<S> {
     type Reader = Buffer;
     type Writer = KvWriter<S>;
+    type ObMultipartWriter = ();
     type Lister = HierarchyLister<KvLister<S::Scanner>>;
     type Deleter = oio::OneShotDeleter<KvDeleter<S>>;
     type BlockingReader = Buffer;
     type BlockingWriter = KvWriter<S>;
+    type BlockingObMultipartWriter = ();
     type BlockingLister = HierarchyLister<BlockingKvLister>;
     type BlockingDeleter = oio::OneShotDeleter<KvDeleter<S>>;
 

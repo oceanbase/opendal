@@ -60,6 +60,7 @@ tests = [
     "dep:sha2",
     "dep:dotenvy",
     "layers-blocking",
+    "layers-tracing",
     "services-azblob",
     "services-fs",
     "services-http",

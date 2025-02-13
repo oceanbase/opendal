@@ -45,16 +45,20 @@ opendal = { version = ">=0", path = "../../core", features = [
   "layers-blocking",
   "layers-tracing",
   # These are default features before v0.46. TODO: change to optional features #4313
-  "services-azblob",
-  "services-cos",
-  "services-fs",
-  "services-gcs",
-  "services-memory",
-  "services-obs",
-  "services-oss",
+  # "services-azblob",
+  # "services-cos",
+  # "services-fs",
+  # "services-gcs",
+  # "services-memory",
+  # "services-obs",
+  # "services-oss",
   "services-s3",
 ] }
-tokio = { version = "1.27", features = ["fs", "macros", "rt-multi-thread"] }
+tokio = { version = "1.27", features = [
+  "fs", 
+  "macros", 
+  "rt-multi-thread"
+] }
 tracing = { version = "0.1"}
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",

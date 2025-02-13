@@ -195,10 +195,12 @@ impl Debug for HttpBackend {
 impl Access for HttpBackend {
     type Reader = HttpBody;
     type Writer = ();
+    type ObMultipartWriter = ();
     type Lister = ();
     type Deleter = ();
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 

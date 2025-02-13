@@ -21,7 +21,7 @@
 
 TEST_F(ObDalTest, test_rw)
 {
-  std::string path = base_path + "test_rw";
+  std::string path = base_path_ + "test_rw";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
     .len = 24,
@@ -52,7 +52,7 @@ TEST_F(ObDalTest, test_rw)
 
 TEST_F(ObDalTest, test_tagging)
 {
-  std::string path = base_path + "test_tagging";
+  std::string path = base_path_ + "test_tagging";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
     .len = 24,
@@ -95,11 +95,11 @@ TEST_F(ObDalTest, test_tagging)
 
     opendal_result_object_tagging_get result2 = opendal_object_tagging_get(result.tagging, "key");
     ASSERT_TRUE(result2.error == nullptr);
-    ASSERT_TRUE(std::strcmp((char *)result2.value.data, "value") == 0);
+    ASSERT_TRUE(strcmp(result2.value, "value") == 0);
 
     opendal_result_object_tagging_get result3 = opendal_object_tagging_get(result.tagging, "key2");
     ASSERT_TRUE(result3.error == nullptr);
-    ASSERT_TRUE(std::strcmp((char *)result3.value.data, "value2") == 0);
+    ASSERT_TRUE(strcmp(result3.value, "value2") == 0);
 
     opendal_bytes_free(&result2.value);
     opendal_bytes_free(&result3.value);
@@ -109,7 +109,7 @@ TEST_F(ObDalTest, test_tagging)
 
 TEST_F(ObDalTest, test_list)
 {
-  std::string path = base_path + "test_list/";
+  std::string path = base_path_ + "test_list/";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
     .len = 24,
@@ -121,7 +121,6 @@ TEST_F(ObDalTest, test_list)
   ASSERT_TRUE(error == nullptr);
   error = opendal_operator_write(op_, (path + "c/b").c_str(), &data);
   ASSERT_TRUE(error == nullptr);
-
   {
     // recursive = true
     opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1000, true/*recursive*/, (path + "a").c_str());
@@ -136,7 +135,9 @@ TEST_F(ObDalTest, test_list)
     ASSERT_TRUE(r_lister_next.error == nullptr);
     ASSERT_TRUE(r_lister_next.entry != nullptr);
     entry = r_lister_next.entry;
-    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), opendal_entry_path(entry)));
+    char *entry_path = opendal_entry_path(entry); 
+    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
+    my_free(entry_path);
     // check file length
     opendal_metadata *meta = opendal_entry_metadata(entry);
     ASSERT_TRUE(meta != nullptr);
@@ -150,7 +151,9 @@ TEST_F(ObDalTest, test_list)
     ASSERT_TRUE(r_lister_next.error == nullptr);
     ASSERT_TRUE(r_lister_next.entry != nullptr);
     entry = r_lister_next.entry;
-    ASSERT_TRUE(0 == strcmp((path + "c/b").c_str(), opendal_entry_path(entry)));
+    entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "c/b").c_str(), entry_path));
+    my_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -175,7 +178,9 @@ TEST_F(ObDalTest, test_list)
     ASSERT_TRUE(r_lister_next.error == nullptr);
     ASSERT_TRUE(r_lister_next.entry != nullptr);
     entry = r_lister_next.entry;
-    ASSERT_TRUE(0 == strcmp((path + "c/").c_str(), opendal_entry_path(entry)));
+    char *entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "c/").c_str(), entry_path));
+    my_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -184,7 +189,9 @@ TEST_F(ObDalTest, test_list)
     ASSERT_TRUE(r_lister_next.error == nullptr);
     ASSERT_TRUE(r_lister_next.entry != nullptr);
     entry = r_lister_next.entry;
-    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), opendal_entry_path(entry)));
+    entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
+    my_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -214,7 +221,7 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   opendal_operator *op = tmp_result.op;
   ASSERT_TRUE(op);
 
-  std::string path = base_path + "test_wrong_endpoint";
+  std::string path = base_path_ + "test_wrong_endpoint";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
     .len = 24,
@@ -222,8 +229,7 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   opendal_error *error =  opendal_operator_write(op, path.c_str(), &data);
   ASSERT_TRUE(error != nullptr);
   ASSERT_TRUE(error->code == OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT);
-  opendal_error_free(error);
-  error = nullptr;
+  free_error(error);
 
   opendal_writer *writer = nullptr;
   opendal_result_operator_writer result = opendal_operator_writer(op, path.c_str());
@@ -234,14 +240,14 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   opendal_error *error2 = opendal_writer_close(writer);
   ASSERT_TRUE(error2 != nullptr);
   ASSERT_TRUE(error2->code == OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT);
-  opendal_error_free(error2);
+  free_error(error2);
   opendal_writer_free(writer);
   opendal_operator_free(op);
 }
 
 TEST_F(ObDalTest, test_batch_delete)
 {
-  std::string path = base_path + "test_batch_delete/";
+  std::string path = base_path_ + "test_batch_delete/";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
     .len = 24,
@@ -280,7 +286,7 @@ TEST_F(ObDalTest, test_batch_delete)
   ASSERT_EQ(result.deleted, 4);
 
   opendal_result_deleter_deleted result_deleted = opendal_deleter_deleted(deleter, (path + "a").c_str());
-  dump_and_free_error(result_deleted.error);
+  dump_error(result_deleted.error);
   ASSERT_EQ(nullptr, result_deleted.error);
   ASSERT_TRUE(result_deleted.deleted);
   result_deleted = opendal_deleter_deleted(deleter, (path + "b").c_str());
@@ -303,7 +309,7 @@ TEST_F(ObDalTest, test_batch_delete)
 TEST_F(ObDalTest, test_list_directories)
 {
   int file_cnt = 10;
-  std::string path = base_path + "test_list_directories/";
+  std::string path = base_path_ + "test_list_directories/";
 
   // write file first, common prefix is path
   // 0/0
@@ -361,7 +367,9 @@ TEST_F(ObDalTest, test_list_directories)
   while (entry != nullptr) {
     // std::cout << "#[entry path]: " << opendal_entry_path(entry) << std::endl;
     // std::cout << "#[entry name]: " << opendal_entry_name(entry) << std::endl;
-    std::string entry_name = opendal_entry_name(entry);
+    char *entry_name_buf = opendal_entry_name(entry);
+    std::string entry_name(entry_name_buf);
+    my_free(entry_name_buf);
     ASSERT_TRUE(entry_name.size() > 0);
     if (entry_name.back() == '/') {
       directories.push_back(entry_name);
@@ -388,10 +396,11 @@ TEST_F(ObDalTest, test_list_directories)
   }
 }
 
+// This case is use to test multipart writing by Writer.
 TEST_F(ObDalTest, test_multipart)
 {
   {
-    std::string path = base_path + "multipart_file";
+    std::string path = base_path_ + "multipart_file";
     opendal_result_operator_writer result_operator_writer = opendal_operator_writer(op_, path.c_str());
     ASSERT_FALSE(result_operator_writer.error);
     opendal_writer *writer = result_operator_writer.writer;
@@ -424,9 +433,12 @@ TEST_F(ObDalTest, test_multipart)
     ASSERT_FALSE(result_reader_read.error);
     ASSERT_EQ(result_reader_read.size, data_size);
     ASSERT_EQ(0, strncmp(data_str, read_buf, data_size));
+    free(read_buf);
+    free(data_str);
+    opendal_reader_free(reader);
   }
   {
-    std::string path = base_path + "test_multipart2";
+    std::string path = base_path_ + "test_multipart2";
     opendal_result_operator_writer r_writer = opendal_operator_writer(op_, path.c_str());
     ASSERT_TRUE(r_writer.error == nullptr);
     ASSERT_TRUE(r_writer.writer != nullptr);
@@ -454,18 +466,82 @@ TEST_F(ObDalTest, test_multipart)
     // if it does exceed, an error is returned.
     r_writer_write = opendal_writer_write(writer, &data);
     ASSERT_TRUE(r_writer_write.error);
-    dump_and_free_error(r_writer_write.error);
+    dump_error(r_writer_write.error);
 
     error = opendal_writer_close(writer);
     ASSERT_TRUE(error);
+    free_error(error);
 
-    opendal_error_free(r_writer_write.error);
+    free_error(r_writer_write.error);
     free(data_str);
     opendal_writer_free(writer);
   }
 }
 
+// This case is use to test multipart writing by ObMultipartWriter
+TEST_F(ObDalTest, test_ob_multipart)
+{
+  std::string path = base_path_ + "ob_multipart_file";
+  opendal_result_operator_multipart_writer result = opendal_operator_multipart_writer(op_, path.c_str());
+  ASSERT_FALSE(result.error);
+  opendal_multipart_writer *writer = result.multipart_writer;
+  ASSERT_TRUE(writer);
+  opendal_error *error = opendal_multipart_writer_initiate(writer);
+  ASSERT_FALSE(error);
 
+  // generate write content
+  const int64_t data_size = 24 * 1024 * 1024LL;
+  char *data_str = static_cast<char *>(malloc(data_size));
+  ASSERT_TRUE(data_str);
+  ASSERT_TRUE(generate_random_bytes(data_str, data_size));
+
+  const int64_t range_count = 4;
+  std::vector<int64_t> borders;
+  std::vector<std::tuple<int64_t, int64_t, int64_t>> ranges;
+  ASSERT_TRUE(divide_interval_evenly(0, data_size - 1, range_count, ranges));
+  shuffle_vec(ranges);
+
+  for (int64_t step = 0; step < range_count; step++) {
+    opendal_bytes data = {
+      .data = (uint8_t *) (data_str + std::get<0>(ranges[step])),
+      .len = (uintptr_t) (std::get<1>(ranges[step]) - std::get<0>(ranges[step])),
+    };
+
+    opendal_result_writer_write result = opendal_multipart_writer_write(writer, &data, std::get<2>(ranges[step]));
+    dump_error(result.error);
+    ASSERT_EQ(nullptr, result.error);
+    ASSERT_EQ(result.size, data.len);
+  }
+
+  error = opendal_multipart_writer_close(writer);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  opendal_result_operator_reader result_operator_reader = opendal_operator_reader(op_, path.c_str());
+  ASSERT_FALSE(result_operator_reader.error);
+  opendal_reader *reader = result_operator_reader.reader;
+  ASSERT_TRUE(reader);
+  char *read_buf = static_cast<char *>(malloc(data_size));
+  ASSERT_TRUE(read_buf);
+  opendal_result_reader_read result_reader_read = opendal_reader_read(reader, (uint8_t *) read_buf, data_size, 0/*offset*/);
+  dump_error(result_reader_read.error);
+  ASSERT_EQ(nullptr, result_reader_read.error);
+  ASSERT_EQ(result_reader_read.size, data_size);
+  ASSERT_EQ(0, strncmp(data_str, read_buf, data_size));
+
+  opendal_reader_free(reader);
+  free(read_buf);
+  opendal_multipart_writer_free(writer);
+  free(data_str);
+}
+
+TEST_F(ObDalTest, test_catch_panic)
+{
+  opendal_error *error = opendal_panic_test();
+  ASSERT_TRUE(error);
+  dump_error(error);
+  free_error(error);
+}
 int main(int argc, char **argv) 
 {
   ::testing::InitGoogleTest(&argc, argv);

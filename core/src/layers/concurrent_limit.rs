@@ -82,6 +82,8 @@ impl<A: Access> LayeredAccess for ConcurrentLimitAccessor<A> {
     type BlockingReader = ConcurrentLimitWrapper<A::BlockingReader>;
     type Writer = ConcurrentLimitWrapper<A::Writer>;
     type BlockingWriter = ConcurrentLimitWrapper<A::BlockingWriter>;
+    type ObMultipartWriter = ConcurrentLimitWrapper<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = ConcurrentLimitWrapper<A::BlockingObMultipartWriter>;
     type Lister = ConcurrentLimitWrapper<A::Lister>;
     type BlockingLister = ConcurrentLimitWrapper<A::BlockingLister>;
     type Deleter = ConcurrentLimitWrapper<A::Deleter>;
@@ -125,6 +127,24 @@ impl<A: Access> LayeredAccess for ConcurrentLimitAccessor<A> {
 
         self.inner
             .write(path, args)
+            .await
+            .map(|(rp, w)| (rp, ConcurrentLimitWrapper::new(w, permit)))
+    }
+
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore must be valid");
+
+        self.inner
+            .ob_multipart_write(path, args)
             .await
             .map(|(rp, w)| (rp, ConcurrentLimitWrapper::new(w, permit)))
     }
@@ -197,6 +217,18 @@ impl<A: Access> LayeredAccess for ConcurrentLimitAccessor<A> {
 
         self.inner
             .blocking_write(path, args)
+            .map(|(rp, w)| (rp, ConcurrentLimitWrapper::new(w, permit)))
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let permit = self
+            .semaphore
+            .clone()
+            .try_acquire_owned()
+            .expect("semaphore must be valid");
+
+        self.inner
+            .blocking_ob_multipart_write(path, args)
             .map(|(rp, w)| (rp, ConcurrentLimitWrapper::new(w, permit)))
     }
 
@@ -283,6 +315,42 @@ impl<R: oio::BlockingWrite> oio::BlockingWrite for ConcurrentLimitWrapper<R> {
 
     fn close(&mut self) -> Result<()> {
         self.inner.close()
+    }
+}
+
+impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for ConcurrentLimitWrapper<R> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        self.inner.initiate_part().await
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        self.inner.write_with_part_id(bs, part_id).await
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.inner.close().await
+    }
+    
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await
+    }
+}
+
+impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for ConcurrentLimitWrapper<R> {
+    fn initiate_part(&mut self) -> Result<()> {
+        self.inner.initiate_part()
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        self.inner.write_with_part_id(bs, part_id)
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.inner.close()
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.inner.abort()
     }
 }
 

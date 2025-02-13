@@ -617,6 +617,43 @@ impl S3Core {
         self.send(req).await
     }
 
+    pub async fn s3_list_objects_v1(
+        &self,
+        path: &str,
+        next_marker: &str,
+        delimiter: &str,
+        limit: Option<usize>,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let mut queries = vec![];
+        if !p.is_empty() {
+            queries.push(format!("prefix={}", percent_encode_path(&p)));
+        }
+        if !delimiter.is_empty() {
+            queries.push(format!("delimiter={delimiter}"));
+        }
+        if let Some(limit) = limit {
+            queries.push(format!("max-keys={limit}"));
+        }
+        if !next_marker.is_empty() {
+            queries.push(format!("marker={next_marker}"));
+        }
+
+        let url = if queries.is_empty() {
+            self.endpoint.to_string()
+        } else {
+            format!("{}?{}", self.endpoint, queries.join("&"))
+        };
+
+        let mut req = Request::get(&url)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+
+        self.send(req).await
+    }
+
     pub async fn s3_list_objects(
         &self,
         path: &str,
@@ -985,6 +1022,17 @@ pub struct DeleteObjectsResultError {
 pub struct ListObjectsOutput {
     pub is_truncated: Option<bool>,
     pub next_continuation_token: Option<String>,
+    pub common_prefixes: Vec<OutputCommonPrefix>,
+    pub contents: Vec<ListObjectsOutputContent>,
+}
+
+/// Oubput of ListObjectsV1
+#[derive(Default, Debug, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ListObjectsOutputV1 {
+    pub is_truncated: Option<bool>,
+    pub marker: Option<String>,
+    pub next_marker: Option<String>,
     pub common_prefixes: Vec<OutputCommonPrefix>,
     pub contents: Vec<ListObjectsOutputContent>,
 }

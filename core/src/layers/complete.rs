@@ -259,6 +259,8 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
     type BlockingReader = CompleteReader<A::BlockingReader>;
     type Writer = CompleteWriter<A::Writer>;
     type BlockingWriter = CompleteWriter<A::BlockingWriter>;
+    type ObMultipartWriter = CompleteObMultipartWriter<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = CompleteObMultipartWriter<A::BlockingObMultipartWriter>;
     type Lister = CompleteLister<A, A::Lister>;
     type BlockingLister = CompleteLister<A, A::BlockingLister>;
     type Deleter = A::Deleter;
@@ -296,6 +298,16 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
         Ok((rp, w))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let (rp, w) = self.inner.ob_multipart_write(path, args.clone()).await?;
+        let w = CompleteObMultipartWriter::new(w);
+        Ok((rp, w))
+    }
+
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.complete_stat(path, args).await
     }
@@ -327,6 +339,12 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
         self.inner
             .blocking_write(path, args)
             .map(|(rp, w)| (rp, CompleteWriter::new(w)))
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner
+            .blocking_ob_multipart_write(path, args)
+            .map(|(rp, w)| (rp, CompleteObMultipartWriter::new(w)))
     }
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
@@ -483,6 +501,108 @@ where
         })?;
 
         w.close()?;
+        self.inner = None;
+        Ok(())
+    }
+}
+
+pub struct CompleteObMultipartWriter<W> {
+    inner: Option<W>,
+}
+
+impl<W> CompleteObMultipartWriter<W> {
+    pub fn new(inner: W) -> CompleteObMultipartWriter<W> {
+        CompleteObMultipartWriter { inner: Some(inner) }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<W> Drop for CompleteObMultipartWriter<W> {
+    fn drop(&mut self) {
+        if self.inner.is_some() {
+            log::warn!("ob multipart writer has not been closed or aborted, must be a bug")
+        }
+    }
+}
+
+impl<W> oio::ObMultipartWrite for CompleteObMultipartWriter<W>
+where 
+    W: oio::ObMultipartWrite
+{
+    async fn initiate_part(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.initiate_part().await
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.write_with_part_id(bs, part_id).await
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.close().await?;
+        self.inner = None;
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.abort().await?;
+        self.inner = None;
+        Ok(())
+    }
+}
+
+
+impl<W> oio::BlockingObMultipartWrite for CompleteObMultipartWriter<W>
+where 
+    W: oio::BlockingObMultipartWrite
+{
+    fn initiate_part(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.initiate_part()
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.write_with_part_id(bs, part_id)
+    }
+
+    fn close(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.close()?;
+        self.inner = None;
+        Ok(())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.abort()?;
         self.inner = None;
         Ok(())
     }

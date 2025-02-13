@@ -78,10 +78,12 @@ impl<A: Access> LayeredAccess for CorrectnessAccessor<A> {
     type Inner = A;
     type Reader = A::Reader;
     type Writer = A::Writer;
+    type ObMultipartWriter = A::ObMultipartWriter;
     type Lister = A::Lister;
     type Deleter = CheckWrapper<A::Deleter>;
     type BlockingReader = A::BlockingReader;
     type BlockingWriter = A::BlockingWriter;
+    type BlockingObMultipartWriter = A::BlockingObMultipartWriter;
     type BlockingLister = A::BlockingLister;
     type BlockingDeleter = CheckWrapper<A::BlockingDeleter>;
 
@@ -131,6 +133,33 @@ impl<A: Access> LayeredAccess for CorrectnessAccessor<A> {
         }
 
         self.inner.write(path, args).await
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let capability = self.info.full_capability();
+        if args.append() && !capability.write_can_append {
+            return Err(new_unsupported_error(
+                &self.info,
+                Operation::ObMultipartWrite,
+                "append",
+            ));
+        }
+        if args.if_not_exists() && !capability.write_with_if_not_exists {
+            return Err(new_unsupported_error(
+                &self.info,
+                Operation::ObMultipartWrite,
+                "if_not_exists",
+            ));
+        }
+        if args.if_none_match().is_some() && !capability.write_with_if_none_match {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::ObMultipartWrite,
+                "if_none_match",
+            ));
+        }
+
+        self.inner.ob_multipart_write(path, args).await
     }
 
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
@@ -195,6 +224,33 @@ impl<A: Access> LayeredAccess for CorrectnessAccessor<A> {
         }
 
         self.inner.blocking_write(path, args)
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let capability = self.info.full_capability();
+        if args.append() && !capability.write_can_append {
+            return Err(new_unsupported_error(
+                &self.info,
+                Operation::BlockingObMultipartWrite,
+                "append",
+            ));
+        }
+        if args.if_not_exists() && !capability.write_with_if_not_exists {
+            return Err(new_unsupported_error(
+                &self.info,
+                Operation::BlockingWrite,
+                "if_not_exists",
+            ));
+        }
+        if args.if_none_match().is_some() && !capability.write_with_if_none_match {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::BlockingWrite,
+                "if_none_match",
+            ));
+        }
+
+        self.inner.blocking_ob_multipart_write(path, args)
     }
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
@@ -285,10 +341,12 @@ mod tests {
     impl Access for MockService {
         type Reader = oio::Reader;
         type Writer = oio::Writer;
+        type ObMultipartWriter = oio::ObMultipartWriter;
         type Lister = oio::Lister;
         type Deleter = oio::Deleter;
         type BlockingReader = oio::BlockingReader;
         type BlockingWriter = oio::BlockingWriter;
+        type BlockingObMultipartWriter = oio::BlockingObMultipartWriter;
         type BlockingLister = oio::BlockingLister;
         type BlockingDeleter = oio::BlockingDeleter;
 

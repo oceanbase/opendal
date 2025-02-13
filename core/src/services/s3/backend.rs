@@ -44,7 +44,7 @@ use reqwest::Url;
 use super::core::*;
 use super::delete::S3Deleter;
 use super::error::parse_error;
-use super::lister::{S3Lister, S3Listers, S3ObjectVersionsLister};
+use super::lister::{S3Lister, S3ListerV1, S3Listers, S3ObjectVersionsLister};
 use super::writer::S3Writer;
 use super::writer::S3Writers;
 use crate::raw::oio::PageLister;
@@ -906,10 +906,12 @@ pub struct S3Backend {
 impl Access for S3Backend {
     type Reader = HttpBody;
     type Writer = S3Writers;
+    type ObMultipartWriter = S3Writers;
     type Lister = S3Listers;
     type Deleter = oio::BatchDeleter<S3Deleter>;
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 
@@ -1070,6 +1072,19 @@ impl Access for S3Backend {
         Ok((RpWrite::default(), w))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let concurrent = args.concurrent();
+        let executor = args.executor().cloned();
+        let writer = S3Writer::new(self.core.clone(), path, args);
+
+        let w = oio::MultipartWriter::new(writer, executor, concurrent);
+        Ok((RpWrite::default(), w))    
+    }
+
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
         Ok((
             RpDelete::default(),
@@ -1087,7 +1102,7 @@ impl Access for S3Backend {
                 args.start_after(),
             )))
         } else {
-            TwoWays::One(PageLister::new(S3Lister::new(
+            TwoWays::One(PageLister::new(S3ListerV1::new(
                 self.core.clone(),
                 path,
                 args.recursive(),

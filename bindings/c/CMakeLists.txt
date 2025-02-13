@@ -22,18 +22,37 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" OFF)
+option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" ON)
 
 # Disabled by default, it can be enabled with -DUSE_GTEST=ON
 option(USE_GTEST "Enable building and running Google Test unit tests." OFF)
-include(FetchContent)
+
 # force the compiler to support these standards
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# for GoogleTest, it should be no less than C++14
-set(CMAKE_CXX_STANDARD 14)
+# for GoogleTest, it should be no less than C++11
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(DEP_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/deps/devel")
+set(TOOL_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/devtools")
+message(NOTICE "-- DEP_DIR: ${DEP_DIR}")
+message(NOTICE "-- TOOL_DIR: ${TOOL_DIR}")
+include_directories(
+    ${DEP_DIR}/include
+    ${TOOL_DIR}/include
+)
+
+link_directories(
+    ${DEP_DIR}/lib
+    ${TOOL_DIR}/lib
+    ${TOOL_DIR}/lib64
+)
+# set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+# set(CMAKE_INSTALL_RPATH "${TOOL_DIR}/lib64/libstdc++")
+set(stdcxx_shared "${TOOL_DIR}/lib64/libstdc++.so.6")
+
 
 set(CARGO_DIST_DIR "${PROJECT_SOURCE_DIR}/target/debug")
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -65,38 +84,41 @@ target_link_libraries(opendal_c_shared INTERFACE ${OPENDAL_SHARED_LIB})
 target_include_directories(opendal_c_shared INTERFACE include)
 add_dependencies(opendal_c_shared cargo_build)
 
-# example targets
-# add_executable(basic examples/basic.cpp)
-# target_link_libraries(basic opendal_c_shared)
-
 add_executable(error_handle examples/error_handle.c)
 target_link_libraries(error_handle opendal_c_shared)
 
 if (USE_GTEST)
-    set(GOOGLETEST_VERSION 1.8.0)
-    FetchContent_Declare(
-        googletest
-        URL https://github.com/google/googletest/archive/refs/tags/release-${GOOGLETEST_VERSION}.zip
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(googletest)
+    # include(FetchContent)
+    # set(GOOGLETEST_VERSION 1.8.0)
+    # FetchContent_Declare(
+    #     googletest
+    #     URL https://github.com/google/googletest/archive/refs/tags/release-${GOOGLETEST_VERSION}.zip
+    #     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    # )
+    # FetchContent_MakeAvailable(googletest)
 
     # test targets
-    file(GLOB TEST_SRCS 
-        tests/bdd.cpp 
-        tests/common.hpp 
-        tests/error_msg.cpp
-        tests/list.cpp
-        tests/opinfo.cpp)
-    add_executable(tests ${TEST_SRCS})
-    target_link_libraries(tests opendal_c_shared gtest_main)
-    if (TEST_ENABLE_ASAN)
-        target_compile_options(tests PRIVATE -fsanitize=address)
-        target_link_options(tests PRIVATE -fsanitize=address)
-    endif()
+    # file(GLOB TEST_SRCS 
+    #     tests/bdd.cpp 
+    #     tests/common.hpp 
+    #     tests/error_msg.cpp
+    #     tests/list.cpp
+    #     tests/opinfo.cpp)
+    # add_executable(tests ${TEST_SRCS})
+    # target_link_libraries(tests opendal_c_shared gtest_main)
 
     add_executable(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
-    target_link_libraries(obdal_test opendal_c_shared gtest)
+    target_link_libraries(obdal_test opendal_c_shared gtest gmock -lpthread)
+    target_link_libraries(obdal_test ${stdcxx_shared})
+    message(STATUS "Linking with: ${stdcxx_shared}")
+
+    if (TEST_ENABLE_ASAN)
+        # target_compile_options(tests PRIVATE -fsanitize=address)
+        # target_link_options(tests PRIVATE -fsanitize=address)
+
+        target_compile_options(obdal_test PRIVATE -fsanitize=address)
+        target_link_options(obdal_test PRIVATE -fsanitize=address)
+    endif()
 endif()
 
 install(

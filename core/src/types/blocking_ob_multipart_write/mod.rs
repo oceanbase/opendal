@@ -15,11 +15,5 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod read;
-pub use read::*;
-
-mod write;
-pub use write::*;
-
-mod ob_multipart_write;
-pub use ob_multipart_write::*;
+mod blocking_ob_multipart_writer;
+pub use blocking_ob_multipart_writer::BlockingObMultipartWriter;

@@ -134,6 +134,7 @@ pub struct MultipartWriter<W: MultipartWrite> {
     parts: Vec<MultipartPart>,
     cache: Option<Buffer>,
     next_part_number: usize,
+    part_counts: usize,
 
     tasks: ConcurrentTasks<WriteInput<W>, MultipartPart>,
 }
@@ -153,6 +154,7 @@ impl<W: MultipartWrite> MultipartWriter<W> {
             parts: Vec::new(),
             cache: None,
             next_part_number: 0,
+            part_counts: 0,
 
             tasks: ConcurrentTasks::new(executor, concurrent, |input| {
                 Box::pin({
@@ -281,6 +283,69 @@ where
                 "multipart part numbers mismatch, please report bug to opendal",
             )
             .with_context("expected", self.next_part_number)
+            .with_context("actual", self.parts.len())
+            .with_context("upload_id", upload_id));
+        }
+        self.w.complete_part(&upload_id, &self.parts).await
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        let Some(upload_id) = self.upload_id.clone() else {
+            return Ok(());
+        };
+
+        self.tasks.clear();
+        self.cache = None;
+        self.w.abort_part(&upload_id).await?;
+        Ok(())
+    }
+}
+
+impl<W> oio::ObMultipartWrite for MultipartWriter<W>
+where
+    W: MultipartWrite,
+{
+    async fn initiate_part(&mut self) -> Result<()> {
+        let upload_id = self.w.initiate_part().await?;
+        let upload_id = Arc::new(upload_id);
+        self.upload_id = Some(upload_id.clone());
+        Ok(())
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let upload_id = self.upload_id.clone()
+            .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
+        let bytes = bs;
+        self.tasks
+            .execute(WriteInput {
+                w: self.w.clone(),
+                executor: self.executor.clone(),
+                upload_id: upload_id.clone(),
+                part_number: part_id,
+                bytes,
+            })
+            .await?;
+        // part_counts indicates the number of parts that have currently been written.
+        self.part_counts += 1;
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        let upload_id = self.upload_id.clone()
+            .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
+        loop {
+            let Some(result) = self.tasks.next().await.transpose()? else {
+                break;
+            };
+            self.parts.push(result)
+        }
+
+        if self.parts.len() != self.part_counts {
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                "multipart part numbers mismatch, please report bug to obdal",
+            )
+            .with_context("expected", self.part_counts)
             .with_context("actual", self.parts.len())
             .with_context("upload_id", upload_id));
         }
