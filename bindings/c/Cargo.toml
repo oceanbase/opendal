@@ -51,7 +51,7 @@ opendal = { version = ">=0", path = "../../core", features = [
   # "services-gcs",
   # "services-memory",
   # "services-obs",
-  # "services-oss",
+  "services-oss",
   "services-s3",
 ] }
 tokio = { version = "1.27", features = [

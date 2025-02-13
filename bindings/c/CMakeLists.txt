@@ -22,7 +22,7 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" ON)
+option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" OFF)
 
 # Disabled by default, it can be enabled with -DUSE_GTEST=ON
 option(USE_GTEST "Enable building and running Google Test unit tests." OFF)

@@ -33,7 +33,9 @@
 class ObDalTest : public ::testing::Test 
 {
 public:
-  ObDalTest() 
+  ObDalTest()
+    : op_(nullptr),
+      ob_span_(nullptr)
   {
     base_path = "obdal_test_" + get_formatted_time() + "/";
   }
@@ -46,17 +48,25 @@ protected:
     ob_span_ = ob_span;
 
     opendal_operator_options *options = opendal_operator_options_new();
-    opendal_operator_options_set(options, "bucket", bucket);
-    opendal_operator_options_set(options, "endpoint", endpoint);
-    opendal_operator_options_set(options, "region", region);
-    opendal_operator_options_set(options, "access_key_id", access_key_id);
-    opendal_operator_options_set(options, "secret_access_key", secret_access_key);
-    opendal_operator_options_set(options, "disable_config_load", "true");
-    opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-    opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-
+    if (strcmp(scheme, "S3") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", endpoint);
+      opendal_operator_options_set(options, "region", region);
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+      opendal_operator_options_set(options, "disable_config_load", "true");
+      opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+      opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+    } else if (strcmp(scheme, "Oss") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", endpoint);
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+    }
+    
     // Given A new OpenDAL Blocking Operator
     opendal_result_operator_new result = opendal_operator_new(scheme, options);
+    dump_error(result.error);
     ASSERT_EQ(nullptr, result.error);
 
     op_ = result.op;
@@ -67,8 +77,12 @@ protected:
 
   void TearDown() override 
   {
-    opendal_operator_free(op_); 
-    ob_drop_span(ob_span_);
+    if (op_ != nullptr) {
+      opendal_operator_free(op_); 
+    }
+    if (ob_span_ != nullptr) {
+      ob_drop_span(ob_span_);
+    }
   }
   static void SetUpTestCase() 
   {

@@ -207,15 +207,25 @@ TEST_F(ObDalTest, test_wrong_endpoint)
 {
   std::string test_wrong_endpoint = "aa." + std::string(endpoint);
   opendal_operator_options *options = opendal_operator_options_new();
-  opendal_operator_options_set(options, "bucket", bucket);
-  opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-  opendal_operator_options_set(options, "region", region);
-  opendal_operator_options_set(options, "access_key_id", access_key_id);
-  opendal_operator_options_set(options, "secret_access_key", secret_access_key);
-  opendal_operator_options_set(options, "disable_config_load", "true");
-  opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-  opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+
+  if (strcmp(scheme, "S3") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+      opendal_operator_options_set(options, "region", region);
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+      opendal_operator_options_set(options, "disable_config_load", "true");
+      opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+      opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+    } else if (strcmp(scheme, "Oss") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+    }
+
   opendal_result_operator_new tmp_result = opendal_operator_new(scheme, options);
+  dump_error(tmp_result.error);
   ASSERT_TRUE(tmp_result.error == nullptr);
   opendal_operator_options_free(options);
   opendal_operator *op = tmp_result.op;
@@ -228,6 +238,7 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   };
   opendal_error *error =  opendal_operator_write(op, path.c_str(), &data);
   ASSERT_TRUE(error != nullptr);
+  dump_error(error);
   ASSERT_TRUE(error->code == OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT);
   free_error(error);
 

@@ -234,20 +234,6 @@ pub struct FunctionObMultipartWriter(
 );
 
 impl FunctionObMultipartWriter {
-    /// Set the append mode of op.
-    ///
-    /// If the append mode is set, the data will be appended to the end of the file.
-    ///
-    /// # Notes
-    ///
-    /// Service could return `Unsupported` if the underlying storage does not support append.
-    pub fn append(mut self, v: bool) -> Self {
-        self.0 = self
-            .0
-            .map_args(|(args, options)| (args.with_append(v), options));
-        self
-    }
-
     /// Set the chunk size of op.
     ///
     /// If chunk size is set, the data will be chunked by the underlying writer.
