@@ -661,6 +661,41 @@ impl OssCore {
         self.sign(&mut req).await?;
         self.send(req).await
     }
+
+    ///
+    pub async fn oss_put_object_tagging(
+        &self,
+        path: &str,
+        args: OpPutObjTag,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+
+        let url = format!("{}/{}?tagging", self.endpoint, percent_encode_path(&p));
+
+        let tagging: Tagging = args.into();
+        let content = quick_xml::se::to_string(&tagging).map_err(new_xml_deserialize_error)?;
+
+        let mut req = Request::put(&url)
+            .body(Buffer::from(Bytes::from(content)))
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+
+        self.send(req).await
+    }
+
+    pub async fn oss_get_object_tagging(&self, path: &str) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let url = format!("{}/{}?tagging", self.endpoint, percent_encode_path(&p));
+
+        let mut req = Request::get(&url)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
+    }
+
 }
 
 /// Request of DeleteObjects.
@@ -750,6 +785,57 @@ pub struct ListObjectsOutputContent {
 #[serde(default, rename_all = "PascalCase")]
 pub struct CommonPrefix {
     pub prefix: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tag {
+    // #[serde(rename = "Key")]
+    pub key: String,
+    // #[serde(rename = "Value")]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagSet {
+    pub tag: Option<Vec<Tag>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tagging {
+    pub tag_set: TagSet,
+}
+
+impl Into<RpGetObjTag> for Tagging {
+    fn into(self) -> RpGetObjTag {
+        match self.tag_set.tag {
+            Some(tag) => RpGetObjTag::new().with_tag_set(
+                tag.iter()
+                    .map(|item| (item.key.to_string(), item.value.to_string()))
+                    .collect(),
+            ),
+            None => RpGetObjTag::new(),
+        }
+    }
+}
+
+impl From<OpPutObjTag> for Tagging {
+    fn from(op: OpPutObjTag) -> Self {
+        let tag: Vec<Tag> = op
+            .tag_set()
+            .iter()
+            .map(|(k, v)| Tag {
+                key: k.to_string(),
+                value: v.to_string(),
+            })
+            .collect();
+
+        Tagging {
+            tag_set: TagSet { tag: Some(tag) },
+        }
+    }
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ static constexpr char access_key_id[] = "xxx";
 static constexpr char secret_access_key[] = "xxx";
 extern "C" void ob_log_handler(const char *level, const char *message) 
 {
-  std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
+  // std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
 }
 
 void *my_alloc(size_t size, size_t align) 
