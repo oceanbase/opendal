@@ -685,6 +685,7 @@ impl BlockingOperator {
         ))
     }
 
+
     /// Write multiple bytes into given path.
     ///
     /// # Notes

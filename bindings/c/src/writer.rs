@@ -81,6 +81,44 @@ impl opendal_writer {
         }
     }
 
+    /// \brief Write data to the writer with the offset.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_writer_write_with_offset(
+        &mut self,
+        offset: u64,
+        bytes: &opendal_bytes,
+    ) -> opendal_result_writer_write {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let size = bytes.len;
+            // Since the write method will consume the buffer, and the buffer passed 
+            // in from outside needs to be released externally, in order to adhere to 
+            // the principle of "who allocates, releases," it is necessary to copy the 
+            // contents of bytes here.
+            let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
+            match self.deref_mut().write_with_offset(offset, copy_bytes) {
+                Ok(()) => opendal_result_writer_write {
+                    size,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_writer_write {
+                    size: 0,
+                    error: opendal_error::new(
+                        core::Error::new(core::ErrorKind::Unexpected, "write_with_offset failed from writer")
+                            .set_source(e),
+                    ),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_writer_write {
+                size: 0,
+                error,
+            }
+        }
+    }
+
+
     /// \brief Abort the pending writer.
     #[no_mangle]
     pub unsafe extern "C" fn opendal_writer_abort(&mut self) -> *mut opendal_error {

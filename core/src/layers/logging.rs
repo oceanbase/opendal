@@ -1089,6 +1089,54 @@ impl<W: oio::Write, I: LoggingInterceptor> oio::Write for LoggingWriter<W, I> {
         }
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+
+        self.logger.log(
+            &self.info,
+            Operation::WriterWithOffset,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write_with_offset(offset, bs).await {
+            Ok(_) => {
+                self.written += size as u64;
+                self.logger.log(
+                    &self.info,
+                    Operation::WriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::WriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
     async fn abort(&mut self) -> Result<()> {
         self.logger.log(
             &self.info,
@@ -1195,6 +1243,56 @@ impl<W: oio::BlockingWrite, I: LoggingInterceptor> oio::BlockingWrite for Loggin
                         ("path", &self.path),
                         ("written", &self.written.to_string()),
                         ("size", &size.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+
+        self.logger.log(
+            &self.info,
+            Operation::BlockingWriterWithOffset,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+                ("offset", &offset.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write(bs) {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingWriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                        ("offset", &offset.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingWriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                        ("offset", &offset.to_string()),
                     ],
                     "failed",
                     Some(&err),

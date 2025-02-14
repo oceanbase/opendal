@@ -333,6 +333,10 @@ impl<I: oio::Write + 'static> oio::BlockingWrite for BlockingWrapper<I> {
         self.handle.block_on(self.inner.write(bs))
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        self.handle.block_on(self.inner.write_with_offset(offset, bs))
+    }
+
     fn close(&mut self) -> Result<()> {
         self.handle.block_on(self.inner.close())
     }

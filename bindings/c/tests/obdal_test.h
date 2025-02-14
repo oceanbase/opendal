@@ -49,7 +49,7 @@ protected:
     ob_span_ = ob_span;
 
     opendal_operator_options *options = opendal_operator_options_new();
-    if (strcmp(scheme, "S3") == 0) {
+    if (strcmp(scheme, "s3") == 0) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);
       opendal_operator_options_set(options, "region", region);
@@ -58,7 +58,7 @@ protected:
       opendal_operator_options_set(options, "disable_config_load", "true");
       opendal_operator_options_set(options, "disable_ec2_metadata", "true");
       opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-    } else if (strcmp(scheme, "Oss") == 0) {
+    } else if (strcmp(scheme, "oss") == 0) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);
       opendal_operator_options_set(options, "access_key_id", access_key_id);
@@ -89,7 +89,10 @@ protected:
   {
     opendal_error *error = opendal_init_env(reinterpret_cast<void *>(my_alloc), 
                                             reinterpret_cast<void *>(my_free),
-                                            reinterpret_cast<void *>(ob_log_handler));
+                                            reinterpret_cast<void *>(ob_log_handler),
+                                            32, // thread count 
+                                            97, // max client count
+                                            60); // max idle time of client (unit s)
     ASSERT_EQ(error, nullptr);
   }
 

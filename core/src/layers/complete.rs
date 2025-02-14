@@ -385,11 +385,13 @@ impl<R> CompleteReader<R> {
 
         match self.read.cmp(&size) {
             Ordering::Equal => Ok(()),
-            Ordering::Less => Err(
-                Error::new(ErrorKind::Unexpected, "reader got too little data")
-                    .with_context("expect", size)
-                    .with_context("actual", self.read),
-            ),
+            // OceanBase expects that no error is returned when the actual read size is less than the expected size.
+            Ordering::Less => Ok(()),
+            // Err(
+                // Error::new(ErrorKind::Unexpected, "reader got too little data")
+                //     .with_context("expect", size)
+                //     .with_context("actual", self.read),
+            // ),
             Ordering::Greater => Err(
                 Error::new(ErrorKind::Unexpected, "reader got too much data")
                     .with_context("expect", size)
@@ -460,6 +462,13 @@ where
         w.write(bs).await
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
+        })?; 
+        w.write_with_offset(offset, bs).await
+    }
+
     async fn close(&mut self) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
@@ -493,6 +502,14 @@ where
         })?;
 
         w.write(bs)
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
+        })?;
+
+        w.write_with_offset(offset, bs) 
     }
 
     fn close(&mut self) -> Result<()> {

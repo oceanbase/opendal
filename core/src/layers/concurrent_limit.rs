@@ -299,6 +299,10 @@ impl<R: oio::Write> oio::Write for ConcurrentLimitWrapper<R> {
         self.inner.write(bs).await
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        self.inner.write_with_offset(offset, bs).await 
+    }
+
     async fn close(&mut self) -> Result<()> {
         self.inner.close().await
     }
@@ -311,6 +315,10 @@ impl<R: oio::Write> oio::Write for ConcurrentLimitWrapper<R> {
 impl<R: oio::BlockingWrite> oio::BlockingWrite for ConcurrentLimitWrapper<R> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
         self.inner.write(bs)
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        self.inner.write_with_offset(offset, bs)
     }
 
     fn close(&mut self) -> Result<()> {

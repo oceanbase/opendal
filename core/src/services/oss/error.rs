@@ -36,7 +36,6 @@ struct OssError {
 
 /// Parse error response into Error.
 pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
-    println!("====================== parse error =======================");
     let (parts, mut body) = resp.into_parts();
     let bs = body.copy_to_bytes(body.remaining());
 
@@ -83,6 +82,7 @@ pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> 
         "InvalidDigest" => Some((ErrorKind::ChecksumError, false)),
         "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)), 
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
+        "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         _ => None,
     }
 }

@@ -338,6 +338,14 @@ impl<R: oio::Write> oio::Write for TracingWrapper<R> {
         parent = &self.span,
         level = "trace",
         skip_all)]
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.write_with_offset(offset, bs)    
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
     fn abort(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
         self.inner.abort()
     }
@@ -358,6 +366,14 @@ impl<R: oio::BlockingWrite> oio::BlockingWrite for TracingWrapper<R> {
         skip_all)]
     fn write(&mut self, bs: Buffer) -> Result<()> {
         self.inner.write(bs)
+    }
+
+    #[tracing::instrument(
+        parent = &self.span,
+        level = "trace",
+        skip_all)]
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        self.inner.write_with_offset(offset, bs)
     }
 
     #[tracing::instrument(

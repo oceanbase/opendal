@@ -17,7 +17,7 @@
 
 use ::opendal as core;
 use std::ffi::c_void;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::catch_unwind;
 
 use crate::handle_result_without_ret;
 use crate::operator::dump_panic;

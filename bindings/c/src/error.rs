@@ -17,7 +17,6 @@
 
 use ::opendal as core;
 use opendal::Buffer;
-use tracing::error;
 use crate::{handle_result_without_ret, types::opendal_bytes};
 use std::panic::catch_unwind;
 

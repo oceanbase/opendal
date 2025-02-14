@@ -865,7 +865,12 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
 
-struct opendal_error *opendal_init_env(void *alloc, void *free, void *loghandler);
+struct opendal_error *opendal_init_env(void *alloc,
+                                       void *free,
+                                       void *loghandler,
+                                       uintptr_t thread_cnt,
+                                       uintptr_t max_idle_client,
+                                       uint64_t max_idle_time_s);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
@@ -1103,6 +1108,12 @@ struct opendal_result_operator_reader opendal_operator_reader(const struct opend
  */
 struct opendal_result_operator_writer opendal_operator_writer(const struct opendal_operator *op,
                                                               const char *path);
+
+/**
+ *
+ */
+struct opendal_result_operator_writer opendal_operator_append_writer(const struct opendal_operator *op,
+                                                                     const char *path);
 
 /**
  * \brief Blocking create a ob_multipart_writer for the specified path.
@@ -1588,7 +1599,7 @@ void opendal_object_tagging_set(struct opendal_object_tagging *self,
 /**
  *TODO
  */
-struct opendal_result_object_tagging_get opendal_object_tagging_get(struct opendal_object_tagging *self,
+struct opendal_result_object_tagging_get opendal_object_tagging_get(const struct opendal_object_tagging *self,
                                                                     const char *key);
 
 /**
@@ -1686,6 +1697,13 @@ void opendal_reader_free(struct opendal_reader *ptr);
  */
 struct opendal_result_writer_write opendal_writer_write(struct opendal_writer *self,
                                                         const struct opendal_bytes *bytes);
+
+/**
+ * \brief Write data to the writer with the offset.
+ */
+struct opendal_result_writer_write opendal_writer_write_with_offset(struct opendal_writer *self,
+                                                                    uint64_t offset,
+                                                                    const struct opendal_bytes *bytes);
 
 /**
  * \brief Abort the pending writer.

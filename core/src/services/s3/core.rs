@@ -724,6 +724,9 @@ impl S3Core {
         if let Some(cache_control) = args.cache_control() {
             req = req.header(CACHE_CONTROL, cache_control)
         }
+        
+        // access gcs via s3 require this header
+        req = req.header(CONTENT_LENGTH, 0);
 
         // Set storage class header
         if let Some(v) = &self.default_storage_class {

@@ -1055,6 +1055,47 @@ impl<R: oio::Write, I: MetricsIntercept> oio::Write for MetricsWrapper<R, I> {
         res
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let op = Operation::WriterWithOffset;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_offset(offset, bs).await {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
     async fn close(&mut self) -> Result<()> {
         let op = Operation::WriterClose;
 
@@ -1124,6 +1165,47 @@ impl<R: oio::BlockingWrite, I: MetricsIntercept> oio::BlockingWrite for MetricsW
         let size = bs.len();
 
         let res = match self.inner.write(bs) {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let op = Operation::BlockingWriterWithOffset;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_offset(offset, bs) {
             Ok(()) => {
                 self.interceptor.observe_operation_bytes(
                     self.scheme,

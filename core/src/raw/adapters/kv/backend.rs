@@ -299,6 +299,13 @@ impl<S: Adapter> oio::Write for KvWriter<S> {
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "Kvwriter doesn't support write_with_offset",
+        ))
+    }
+
     async fn close(&mut self) -> Result<()> {
         let buf = self.buffer.clone().collect();
         self.kv.set(&self.path, buf).await
@@ -314,6 +321,13 @@ impl<S: Adapter> oio::BlockingWrite for KvWriter<S> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
         self.buffer.push(bs);
         Ok(())
+    }
+
+    fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "Kvwriter doesn't support write_with_offset",
+        )) 
     }
 
     fn close(&mut self) -> Result<()> {

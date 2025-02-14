@@ -578,10 +578,8 @@ impl Access for OssBackend {
         let writer = OssWriter::new(self.core.clone(), path, args.clone());
 
         let w = if args.append() {
-            println!("===================== oss appendwriter ========================");
             OssWriters::Two(oio::AppendWriter::new(writer))
         } else {
-            println!("===================== oss multipartwriter ========================");
             OssWriters::One(oio::MultipartWriter::new(
                 writer,
                 args.executor().cloned(),

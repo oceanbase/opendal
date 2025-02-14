@@ -158,7 +158,7 @@ impl opendal_object_tagging {
     ///TODO
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_get(
-        &mut self,
+        &self,
         key: *const c_char,
     ) -> opendal_result_object_tagging_get {
         let ret = catch_unwind(|| {

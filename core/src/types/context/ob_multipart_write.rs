@@ -25,6 +25,7 @@ pub struct ObMultipartWriteContext {
     acc: Accessor,
     path: String,
     args: OpWrite,
+    #[allow(dead_code)]
     options: OpWriter,
 }
 
@@ -55,6 +56,7 @@ impl ObMultipartWriteContext {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn options(&self) -> &OpWriter {
         &self.options
     }
@@ -73,6 +75,7 @@ impl ObMultipartWriteGenerator<oio::ObMultipartWriter> {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     fn new(w: oio::ObMultipartWriter) -> Self {
         Self {
             w

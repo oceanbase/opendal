@@ -96,6 +96,12 @@ where
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+        self.inner.append(offset, size as u64, bs).await?;
+        Ok(())
+    }
+
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }
