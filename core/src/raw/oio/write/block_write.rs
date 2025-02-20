@@ -187,6 +187,13 @@ where
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "block writer doesn't support write_with_offset",
+        ))
+    }
+
     async fn close(&mut self) -> Result<()> {
         if !self.started {
             let (size, body) = match self.cache.clone() {

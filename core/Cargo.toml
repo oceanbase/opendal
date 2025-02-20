@@ -67,6 +67,7 @@ tests = [
     "services-memory",
     "internal-tokio-rt",
     "services-s3",
+    "services-oss",
 ]
 
 # Enable path cache.

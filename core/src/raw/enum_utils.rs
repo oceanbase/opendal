@@ -77,6 +77,13 @@ impl<ONE: oio::Write, TWO: oio::Write> oio::Write for TwoWays<ONE, TWO> {
         }
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        match self {
+            Self::One(v) => v.write_with_offset(offset, bs).await,
+            Self::Two(v) => v.write_with_offset(offset, bs).await,
+        } 
+    }
+
     async fn close(&mut self) -> Result<()> {
         match self {
             Self::One(v) => v.close().await,
@@ -143,6 +150,14 @@ impl<ONE: oio::Write, TWO: oio::Write, THREE: oio::Write> oio::Write
             Self::One(v) => v.write(bs).await,
             Self::Two(v) => v.write(bs).await,
             Self::Three(v) => v.write(bs).await,
+        }
+    }
+
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        match self {
+            Self::One(v) => v.write_with_offset(offset, bs).await,
+            Self::Two(v) => v.write_with_offset(offset, bs).await,
+            Self::Three(v) => v.write_with_offset(offset, bs).await,
         }
     }
 

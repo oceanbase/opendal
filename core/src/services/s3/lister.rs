@@ -21,7 +21,7 @@ use super::core::{ListObjectsOutputV1, S3Core};
 use super::core::{ListObjectVersionsOutput, ListObjectsOutput};
 use super::error::parse_error;
 use crate::raw::oio::PageContext;
-use crate::raw::*;
+use crate::{raw::*, ErrorKind};
 use crate::EntryMode;
 use crate::Error;
 use crate::Metadata;
@@ -43,6 +43,7 @@ pub struct S3Lister {
 }
 
 impl S3Lister {
+    #[allow(dead_code)]
     pub fn new(
         core: Arc<S3Core>,
         path: &str,
@@ -213,10 +214,23 @@ impl oio::PageList for S3ListerV1 {
         } else if let Some(next_marker) = output.next_marker.as_ref() {
             next_marker.is_empty()
         } else {
-            output.contents.is_empty()
+            output.contents.is_empty() && output.common_prefixes.is_empty()
         };
-        
-        ctx.token = output.next_marker.clone().unwrap_or_default();
+
+        // NextMaker is returned only if you have the delimiter element.
+        // when build a Lister with recursive = true, the delimiter is set to empty.
+        // Therefore，we need to set ctx.token with the key of the last content.
+        // reference to: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html
+        ctx.token = String::new();
+        if self.delimiter.is_empty() {
+            if output.contents.len() > 0 {
+                ctx.token = output.contents.last().unwrap().key.clone();
+            }
+        } else if output.next_marker.is_some() {
+            ctx.token = output.next_marker.unwrap().clone();
+        } else if !ctx.done {
+            return Err(Error::new(ErrorKind::Unexpected, "When the list has not yet ended (done is false), next_marker is empty."))
+        }
 
         for prefix in output.common_prefixes {
             let de = oio::Entry::new(

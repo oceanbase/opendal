@@ -270,6 +270,12 @@ impl WriteGenerator<oio::BlockingWriter> {
         Ok(n)
     }
 
+    /// Write with offset
+    pub fn write_with_offset(&mut self, offset: u64,  bs: Buffer) -> Result<()> {
+        self.w.write_with_offset(offset, bs)?;
+        Ok(())
+    } 
+
     /// Finish the write process.
     pub fn close(&mut self) -> Result<()> {
         loop {
@@ -353,6 +359,10 @@ mod tests {
 
             let mut buf = self.buf.lock().await;
             buf.put(bs);
+            Ok(())
+        }
+
+        async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
             Ok(())
         }
 

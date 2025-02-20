@@ -390,6 +390,12 @@ impl<R: oio::Write> oio::Write for TimeoutWrapper<R> {
         Self::io_timeout(self.timeout, Operation::WriterWrite.into_static(), fut).await
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let fut = self.inner.write_with_offset(offset, bs);
+        Self::io_timeout(self.timeout, Operation::WriterWrite.into_static(), fut).await
+    }
+
+
     async fn close(&mut self) -> Result<()> {
         let fut = self.inner.close();
         Self::io_timeout(self.timeout, Operation::WriterClose.into_static(), fut).await

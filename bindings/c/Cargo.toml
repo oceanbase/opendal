@@ -51,7 +51,7 @@ opendal = { version = ">=0", path = "../../core", features = [
   # "services-gcs",
   # "services-memory",
   # "services-obs",
-  # "services-oss",
+  "services-oss",
   "services-s3",
 ] }
 tokio = { version = "1.27", features = [
@@ -65,3 +65,6 @@ tracing-subscriber = { version = "0.3", features = [
     "tracing-log",
     "local-time",
 ] }
+reqwest = { version = "0.12.2", features = [
+    "stream",
+], default-features = false }

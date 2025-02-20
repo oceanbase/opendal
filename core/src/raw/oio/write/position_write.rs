@@ -149,6 +149,13 @@ impl<W: PositionWrite> oio::Write for PositionWriter<W> {
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "position writer doesn't support write_with_offset",
+        ))
+    }
+
     async fn close(&mut self) -> Result<()> {
         // Make sure all tasks are finished.
         while self.tasks.next().await.transpose()?.is_some() {}

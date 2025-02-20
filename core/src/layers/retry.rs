@@ -649,6 +649,28 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
         res.map_err(|err| err.set_persistent())
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        use backon::RetryableWithContext;
+
+        let inner = self.take_inner()?;
+
+        let ((inner, _), res) = {
+            |(mut r, bs): (R, Buffer)| async move {
+                let res = r.write_with_offset(offset, bs.clone()).await;
+
+                ((r, bs), res)
+            }
+        }
+        .retry(self.builder)
+        .when(|e| e.is_temporary())
+        .context((inner, bs))
+        .notify(|err, dur| self.notify.intercept(err, dur))
+        .await;
+
+        self.inner = Some(inner);
+        res.map_err(|err| err.set_persistent()) 
+    }
+
     async fn abort(&mut self) -> Result<()> {
         use backon::RetryableWithContext;
 
@@ -697,6 +719,17 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
 impl<R: oio::BlockingWrite, I: RetryInterceptor> oio::BlockingWrite for RetryWrapper<R, I> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
         { || self.inner.as_mut().unwrap().write(bs.clone()) }
+            .retry(self.builder)
+            .when(|e| e.is_temporary())
+            .notify(|err, dur| {
+                self.notify.intercept(err, dur);
+            })
+            .call()
+            .map_err(|e| e.set_persistent())
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        { || self.inner.as_mut().unwrap().write_with_offset(offset, bs.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
@@ -1100,6 +1133,10 @@ mod tests {
 
     impl oio::Write for MockWriter {
         async fn write(&mut self, _: Buffer) -> Result<()> {
+            Ok(())
+        }
+
+        async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
             Ok(())
         }
 

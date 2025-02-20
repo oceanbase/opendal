@@ -77,6 +77,11 @@ impl BlockingWriter {
         Ok(())
     }
 
+    /// Write with offset
+    pub fn write_with_offset(&mut self, offset: u64, bs: impl Into<Buffer>) -> Result<()> {
+        self.inner.write_with_offset(offset, bs.into())
+    }
+
     /// Close the writer and make sure all data have been committed.
     ///
     /// ## Notes

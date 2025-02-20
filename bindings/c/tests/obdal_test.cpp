@@ -50,6 +50,39 @@ TEST_F(ObDalTest, test_rw)
   opendal_reader_free(reader);
 }
 
+TEST_F(ObDalTest, test_nohead_read)
+{
+  std::string path = base_path_ + "test_nohead_read";
+  opendal_bytes data =  {
+    .data = (uint8_t *)"123456789",
+    .len = 9,
+  };
+  opendal_error *error = opendal_operator_write(op_, path.c_str(), &data);
+  ASSERT_TRUE(error == nullptr);
+  opendal_result_operator_reader result_reader = opendal_operator_reader(op_, path.c_str());
+  ASSERT_TRUE(result_reader.error == nullptr);
+  opendal_reader *reader = result_reader.reader;
+  ASSERT_TRUE(reader != nullptr);
+
+  uint8_t buf[100] = { 0 };
+  opendal_result_reader_read result_reader_read = opendal_reader_read(reader, buf, 100, 5);
+  ASSERT_TRUE(result_reader_read.error == nullptr);
+  ASSERT_TRUE(result_reader_read.size == 4);
+
+  /* Lets print it out */
+  for (int i = 0; i < 4; ++i) {
+    ASSERT_TRUE(buf[i] == data.data[i + 5]);
+  }
+
+  result_reader_read = opendal_reader_read(reader, buf, 100, 9);
+  ASSERT_NE(result_reader_read.error, nullptr);
+  free_error(result_reader_read.error);
+  ASSERT_EQ(result_reader_read.size, 0);
+
+  opendal_reader_free(reader);
+  opendal_bytes_free(&data);
+}
+
 TEST_F(ObDalTest, test_tagging)
 {
   std::string path = base_path_ + "test_tagging";
@@ -82,6 +115,7 @@ TEST_F(ObDalTest, test_tagging)
     opendal_object_tagging_set(tagging, "key", "value");
     opendal_object_tagging_set(tagging, "key2", "value2");
     opendal_error *error = opendal_operator_put_object_tagging(op_, path.c_str(), tagging);
+    dump_error(error);
     ASSERT_TRUE(error == nullptr);
 
     opendal_object_tagging_free(tagging);
@@ -123,7 +157,7 @@ TEST_F(ObDalTest, test_list)
   ASSERT_TRUE(error == nullptr);
   {
     // recursive = true
-    opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1000, true/*recursive*/, (path + "a").c_str());
+    opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1, true/*recursive*/, (path + "a").c_str());
     ASSERT_TRUE(l.error == nullptr);
     ASSERT_TRUE(l.lister != nullptr);
     opendal_lister *lister = l.lister;
@@ -166,11 +200,16 @@ TEST_F(ObDalTest, test_list)
 
   {
     // recursive = false
-    opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1000, false/*recursive*/, (path + "a").c_str());
+    // The order in which the list is returned is not fixed and depends on the page.
+    // If a page can fit all entries, folders will be returned first, and if not, files will be returned
+    // therefore, when limit = 10, the order of entry is as follows:
+    // c/
+    // a
+    // b
+    opendal_result_list l = opendal_operator_list(op_, path.c_str(), 10, false/*recursive*/, "");
     ASSERT_TRUE(l.error == nullptr);
     ASSERT_TRUE(l.lister != nullptr);
     opendal_lister *lister = l.lister;
-
     opendal_entry *entry = nullptr;
 
     // first should be testpath/c/, because common prefix is handled first
@@ -190,7 +229,69 @@ TEST_F(ObDalTest, test_list)
     ASSERT_TRUE(r_lister_next.entry != nullptr);
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "a").c_str(), entry_path));
+    my_free(entry_path);
+    opendal_entry_free(entry);
+    entry = nullptr;
+
+    r_lister_next = opendal_lister_next(lister);
+    ASSERT_TRUE(r_lister_next.error == nullptr);
+    ASSERT_TRUE(r_lister_next.entry != nullptr);
+    entry = r_lister_next.entry;
+    entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
+    my_free(entry_path);
+    opendal_entry_free(entry);
+    entry = nullptr;
+
+    // end
+    r_lister_next = opendal_lister_next(lister);
+    ASSERT_TRUE(r_lister_next.error == nullptr);
+    ASSERT_TRUE(r_lister_next.entry == nullptr);
+    opendal_lister_free(lister);
+  }
+
+  {
+    // therefore, when limit = 1, the order of entry is as follows:
+    // a
+    // b
+    // c/
+    opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1, false/*recursive*/, "");
+    ASSERT_TRUE(l.error == nullptr);
+    ASSERT_TRUE(l.lister != nullptr);
+    opendal_lister *lister = l.lister;
+    opendal_entry *entry = nullptr;
+
+    // first should be testpath/c/, because common prefix is handled first
+    opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
+    ASSERT_TRUE(r_lister_next.error == nullptr);
+    ASSERT_TRUE(r_lister_next.entry != nullptr);
+    entry = r_lister_next.entry;
+    char *entry_path = opendal_entry_path(entry);
+    std::cout << "entry_path:" << entry_path << std::endl;
+    ASSERT_TRUE(0 == strcmp((path + "a").c_str(), entry_path));
+    my_free(entry_path);
+    opendal_entry_free(entry);
+    entry = nullptr;
+
+    // second should be testpath/b
+    r_lister_next = opendal_lister_next(lister);
+    ASSERT_TRUE(r_lister_next.error == nullptr);
+    ASSERT_TRUE(r_lister_next.entry != nullptr);
+    entry = r_lister_next.entry;
+    entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
+    my_free(entry_path);
+    opendal_entry_free(entry);
+    entry = nullptr;
+
+    // third shoudl be testpath/c/
+    r_lister_next = opendal_lister_next(lister);
+    ASSERT_TRUE(r_lister_next.error == nullptr);
+    ASSERT_TRUE(r_lister_next.entry != nullptr);
+    entry = r_lister_next.entry;
+    entry_path = opendal_entry_path(entry);
+    ASSERT_TRUE(0 == strcmp((path + "c/").c_str(), entry_path));
     my_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
@@ -207,15 +308,25 @@ TEST_F(ObDalTest, test_wrong_endpoint)
 {
   std::string test_wrong_endpoint = "aa." + std::string(endpoint);
   opendal_operator_options *options = opendal_operator_options_new();
-  opendal_operator_options_set(options, "bucket", bucket);
-  opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-  opendal_operator_options_set(options, "region", region);
-  opendal_operator_options_set(options, "access_key_id", access_key_id);
-  opendal_operator_options_set(options, "secret_access_key", secret_access_key);
-  opendal_operator_options_set(options, "disable_config_load", "true");
-  opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-  opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+
+  if (strcmp(scheme, "s3") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+      opendal_operator_options_set(options, "region", region);
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+      opendal_operator_options_set(options, "disable_config_load", "true");
+      opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+      opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+    } else if (strcmp(scheme, "oss") == 0) {
+      opendal_operator_options_set(options, "bucket", bucket);
+      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+      opendal_operator_options_set(options, "access_key_id", access_key_id);
+      opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+    }
+
   opendal_result_operator_new tmp_result = opendal_operator_new(scheme, options);
+  dump_error(tmp_result.error);
   ASSERT_TRUE(tmp_result.error == nullptr);
   opendal_operator_options_free(options);
   opendal_operator *op = tmp_result.op;
@@ -228,6 +339,7 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   };
   opendal_error *error =  opendal_operator_write(op, path.c_str(), &data);
   ASSERT_TRUE(error != nullptr);
+  dump_error(error);
   ASSERT_TRUE(error->code == OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT);
   free_error(error);
 
@@ -247,6 +359,7 @@ TEST_F(ObDalTest, test_wrong_endpoint)
 
 TEST_F(ObDalTest, test_batch_delete)
 {
+  // This case not support for gcs
   std::string path = base_path_ + "test_batch_delete/";
   opendal_bytes data = {
     .data = (uint8_t*)"this_string_length_is_24",
@@ -532,6 +645,61 @@ TEST_F(ObDalTest, test_ob_multipart)
   opendal_reader_free(reader);
   free(read_buf);
   opendal_multipart_writer_free(writer);
+  free(data_str);
+}
+
+TEST_F(ObDalTest, test_append_writer)
+{
+  if (strcmp(scheme, "oss") != 0) {
+    return;
+  }
+  std::string path = base_path_ + "append_file";
+  opendal_result_operator_writer result = opendal_operator_append_writer(op_, path.c_str());
+  ASSERT_FALSE(result.error);
+  opendal_writer *writer = result.writer;
+  ASSERT_TRUE(writer);
+
+  // generate write content
+  const int64_t data_size = 24 * 1024 * 1024LL;
+  char *data_str = static_cast<char *>(malloc(data_size));
+  ASSERT_TRUE(data_str);
+  ASSERT_TRUE(generate_random_bytes(data_str, data_size));
+
+  std::vector<std::tuple<int64_t, int64_t, int64_t>> ranges;
+  const int64_t range_count = 4;
+  ASSERT_TRUE(divide_interval_evenly(0, data_size - 1, range_count, ranges));
+
+  for (int step = 0; step < range_count; step++) {
+    opendal_bytes data = {
+      .data = (uint8_t *) (data_str + std::get<0>(ranges[step])),
+      .len = (uintptr_t) (std::get<1>(ranges[step]) - std::get<0>(ranges[step])),
+    };
+
+    opendal_result_writer_write result = opendal_writer_write_with_offset(writer, std::get<0>(ranges[step]), &data);
+    dump_error(result.error);
+    ASSERT_EQ(nullptr, result.error);
+    ASSERT_EQ(result.size, data.len);
+  }
+
+  opendal_error *error = opendal_writer_close(writer);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  opendal_result_operator_reader result_operator_reader = opendal_operator_reader(op_, path.c_str());
+  ASSERT_FALSE(result_operator_reader.error);
+  opendal_reader *reader = result_operator_reader.reader;
+  ASSERT_TRUE(reader);
+  char *read_buf = static_cast<char *>(malloc(data_size));
+  ASSERT_TRUE(read_buf);
+  opendal_result_reader_read result_reader_read = opendal_reader_read(reader, (uint8_t *) read_buf, data_size, 0/*offset*/);
+  dump_error(result_reader_read.error);
+  ASSERT_EQ(nullptr, result_reader_read.error);
+  ASSERT_EQ(result_reader_read.size, data_size);
+  ASSERT_EQ(0, strncmp(data_str, read_buf, data_size));
+
+  opendal_reader_free(reader);
+  free(read_buf);
+  opendal_writer_free(writer);
   free(data_str);
 }
 

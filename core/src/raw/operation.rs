@@ -35,6 +35,8 @@ pub enum Operation {
     Write,
     /// Operation for [`crate::raw::oio::Write::write`]
     WriterWrite,
+    /// Operation for [`crate::raw::oio::Write::write_with_offset`]
+    WriterWithOffset,
     /// Operation for [`crate::raw::oio::Write::close`]
     WriterClose,
     /// Operation for [`crate::raw::oio::Write::abort`]
@@ -83,6 +85,8 @@ pub enum Operation {
     BlockingWrite,
     /// Operation for [`crate::raw::oio::BlockingWrite::write`]
     BlockingWriterWrite,
+    /// Operation for [`crate::raw::oio::BlockingWrite::write_with_offset`]
+    BlockingWriterWithOffset,
     /// Operation for [`crate::raw::oio::BlockingWrite::close`]
     BlockingWriterClose,
     /// Operation for [`crate::raw::Access::blocking_ob_multipart_write`]
@@ -160,6 +164,7 @@ impl From<Operation> for &'static str {
             Operation::ReaderRead => "Reader::read",
             Operation::Write => "write",
             Operation::WriterWrite => "Writer::write",
+            Operation::WriterWithOffset => "Writer::write_with_offset",
             Operation::WriterClose => "Writer::close",
             Operation::WriterAbort => "Writer::abort",
             Operation::ObMultipartWrite => "ob_multipart_write",
@@ -181,6 +186,7 @@ impl From<Operation> for &'static str {
             Operation::BlockingReaderRead => "BlockingReader::read",
             Operation::BlockingWrite => "blocking_write",
             Operation::BlockingWriterWrite => "BlockingWriter::write",
+            Operation::BlockingWriterWithOffset => "BlockingWriter::write_with_offset",
             Operation::BlockingWriterClose => "BlockingWriter::close",
             Operation::BlockingObMultipartWrite => "blocking_ob_multipart_write",
             Operation::BlockingObMultipartWriterInitiatePart => "BlockingObMultipartWriter::initiate_part",

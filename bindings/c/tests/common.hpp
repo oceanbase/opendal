@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <cassert>
 #include <string>
+#include <fstream>
 
 static constexpr char scheme[] = "xxx";
 static constexpr char region[] = "xxx";
@@ -39,7 +40,10 @@ static constexpr char access_key_id[] = "xxx";
 static constexpr char secret_access_key[] = "xxx";
 extern "C" void ob_log_handler(const char *level, const char *message) 
 {
-  std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
+  // std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
+  std::fstream out("opendal.log", std::ios::out | std::ios::app);
+  out << "[" << level << "] " << message << std::endl;
+  out.close();
 }
 
 void *my_alloc(size_t size, size_t align) 

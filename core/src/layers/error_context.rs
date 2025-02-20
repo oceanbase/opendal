@@ -410,6 +410,23 @@ impl<T: oio::Write> oio::Write for ErrorContextWrapper<T> {
             })
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_offset(offset, bs)
+            .await
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::WriterWithOffset)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
     async fn close(&mut self) -> Result<()> {
         self.inner.close().await.map_err(|err| {
             err.with_operation(Operation::WriterClose)
@@ -442,6 +459,23 @@ impl<T: oio::BlockingWrite> oio::BlockingWrite for ErrorContextWrapper<T> {
                     .with_context("service", self.scheme)
                     .with_context("path", &self.path)
                     .with_context("size", size.to_string())
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_offset(offset, bs)
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::BlockingWriterWithOffset)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("offset", offset)
                     .with_context("written", self.processed.to_string())
             })
     }

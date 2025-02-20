@@ -22,7 +22,7 @@ use tracing::warn;
 
 use ::opendal as core;
 
-use crate::{dump_panic, handle_result, handle_result_without_ret, opendal_operator};
+use crate::{dump_panic, handle_result_without_ret, opendal_operator};
 
 /// \brief Metadata for **operator**, users can use this metadata to get information
 /// of operator.

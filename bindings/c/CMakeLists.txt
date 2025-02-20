@@ -22,7 +22,7 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" ON)
+option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" OFF)
 
 # Disabled by default, it can be enabled with -DUSE_GTEST=ON
 option(USE_GTEST "Enable building and running Google Test unit tests." OFF)
@@ -35,8 +35,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(DEP_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/deps/devel")
-set(TOOL_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/devtools")
+set(DEP_DIR "${PROJECT_SOURCE_DIR}/../../rpm/deps/3rd/usr/local/oceanbase/deps/devel")
+set(TOOL_DIR "${PROJECT_SOURCE_DIR}/../../rpm/deps/3rd/usr/local/oceanbase/devtools")
 message(NOTICE "-- DEP_DIR: ${DEP_DIR}")
 message(NOTICE "-- TOOL_DIR: ${TOOL_DIR}")
 include_directories(
@@ -108,8 +108,8 @@ if (USE_GTEST)
     # target_link_libraries(tests opendal_c_shared gtest_main)
 
     add_executable(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
-    target_link_libraries(obdal_test opendal_c_shared gtest gmock -lpthread)
-    target_link_libraries(obdal_test ${stdcxx_shared})
+    target_link_libraries(obdal_test PRIVATE opendal_c_shared gtest gmock -lpthread)
+    target_link_libraries(obdal_test PRIVATE ${stdcxx_shared})
     message(STATUS "Linking with: ${stdcxx_shared}")
 
     if (TEST_ENABLE_ASAN)
