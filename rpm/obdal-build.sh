@@ -38,7 +38,7 @@ RPM_BUILD_DIR=$BASE_DIR/.rpm_build
 echo "[BUILD] args: CURDIR=${CUR_DIR} PROJECT_NAME=${PROJECT_NAME} RELEASE=${RELEASE}"
 
 ARCH=`uname -p`
-TARGET_DIR_3rd=${CUR_DIR}/deps/3rd
+TARGET_DIR_3rd=$BASE_DIR/bindings/c/deps/3rd
 PKG_DIR=${TARGET_DIR_3rd}/pkg
 mkdir -p $PKG_DIR
 
@@ -76,7 +76,8 @@ fi
 if [[ -n "$BUILD_ENV" ]]; then
     cd $BASE_DIR/bindings/c/
     rm -rf build
-    mkdir build && cd build
+    mkdir build 
+    cd build
     cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_GTEST=ON
     cp compile_commands.json ..
 else
