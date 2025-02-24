@@ -1004,7 +1004,7 @@ pub unsafe extern "C" fn opendal_operator_get_object_tagging(
     let ret = catch_unwind(|| {
         if path.is_null() {
             return opendal_result_get_object_tagging {
-                tagging: opendal_object_tagging::new(),
+                tagging: std::ptr::null_mut(),
                 error: opendal_error::new(core::Error::new(
                     core::ErrorKind::ConfigInvalid,
                     "invalid_args",
@@ -1022,7 +1022,7 @@ pub unsafe extern "C" fn opendal_operator_get_object_tagging(
                 error: std::ptr::null_mut(),
             },
             Err(e) => opendal_result_get_object_tagging {
-                tagging: opendal_object_tagging::new(),
+                tagging: std::ptr::null_mut(),
                 error: opendal_error::new(e),
             },
         }

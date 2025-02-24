@@ -75,6 +75,7 @@ TEST_F(ObDalTest, test_nohead_read)
   }
 
   result_reader_read = opendal_reader_read(reader, buf, 100, 9);
+  dump_error(result_reader_read.error);
   ASSERT_NE(result_reader_read.error, nullptr);
   free_error(result_reader_read.error);
   ASSERT_EQ(result_reader_read.size, 0);
@@ -395,6 +396,7 @@ TEST_F(ObDalTest, test_batch_delete)
   // Third, flush the deleter.
   // Notice that the no-exist file should be deleted successfully.
   opendal_result_deleter_flush result = opendal_deleter_flush(deleter);
+  dump_error(result.error);
   ASSERT_TRUE(result.error == nullptr);
   ASSERT_EQ(result.deleted, 4);
 
