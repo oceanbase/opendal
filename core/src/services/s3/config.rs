@@ -182,7 +182,9 @@ pub struct S3Config {
     /// This is necessary when writing to AWS S3 Buckets with Object Lock enabled for example.
     ///
     /// Available options:
+    /// - "md5"
     /// - "crc32c"
+    /// - "crc32"
     pub checksum_algorithm: Option<String>,
     /// Disable write with if match so that opendal will not send write request with if match headers.
     ///

@@ -552,7 +552,9 @@ impl S3Builder {
     /// This is necessary when writing to AWS S3 Buckets with Object Lock enabled for example.
     ///
     /// Available options:
+    /// - "md5"
     /// - "crc32c"
+    /// - "crc32"
     pub fn checksum_algorithm(mut self, checksum_algorithm: &str) -> Self {
         self.config.checksum_algorithm = Some(checksum_algorithm.to_string());
 
@@ -751,6 +753,8 @@ impl Builder for S3Builder {
 
         let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {
             Some("crc32c") => Some(ChecksumAlgorithm::Crc32c),
+            Some("crc32") => Some(ChecksumAlgorithm::Crc32),
+            Some("md5") => Some(ChecksumAlgorithm::Md5),
             None => None,
             _ => {
                 return Err(Error::new(

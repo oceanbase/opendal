@@ -64,6 +64,7 @@ protected:
       opendal_operator_options_set(options, "access_key_id", access_key_id);
       opendal_operator_options_set(options, "access_key_secret", secret_access_key);
     }
+    opendal_operator_options_set(options, "checksum_algorithm", "md5");
     
     // Given A new OpenDAL Blocking Operator
     opendal_result_operator_new result = opendal_operator_new(scheme, options);

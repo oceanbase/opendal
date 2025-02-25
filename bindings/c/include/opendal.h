@@ -96,6 +96,10 @@ typedef enum opendal_code {
    * The operation is timed out.
    */
   OPENDAL_TIMED_OUT,
+  /**
+   * checksum type is not supported
+   */
+  OPENDAL_CHECKSUM_UNSUPPORTED,
 } opendal_code;
 
 /**
@@ -869,8 +873,8 @@ struct opendal_error *opendal_init_env(void *alloc,
                                        void *free,
                                        void *loghandler,
                                        uintptr_t thread_cnt,
-                                       uintptr_t max_idle_client,
-                                       uint64_t max_idle_time_s);
+                                       uintptr_t pool_max_idle_per_host,
+                                       uint64_t pool_max_idle_time_s);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.

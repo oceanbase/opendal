@@ -15,11 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::time::Duration;
+use std::fmt::Display;
 
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use bytes::Bytes;
 use constants::X_OSS_META_PREFIX;
 use http::header::CACHE_CONTROL;
@@ -39,6 +43,7 @@ use reqsign::AliyunLoader;
 use reqsign::AliyunOssSigner;
 use serde::Deserialize;
 use serde::Serialize;
+use md5::{Md5, Digest};
 
 use crate::raw::*;
 use crate::services::oss::core::constants::X_OSS_FORBID_OVERWRITE;
@@ -76,6 +81,7 @@ pub struct OssCore {
     pub loader: AliyunLoader,
     pub signer: AliyunOssSigner,
     pub delete_max_size: usize,
+    pub checksum_algorithm: Option<ChecksumAlgorithm>,
 }
 
 impl Debug for OssCore {
@@ -239,6 +245,28 @@ impl OssCore {
 
         Ok(m)
     }
+
+    pub fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
+        match self.checksum_algorithm {
+            None => None,
+            Some(ChecksumAlgorithm::Md5) => {
+                let mut hasher = Md5::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest))
+            },
+        }
+    }
+    pub fn insert_checksum_header(
+        &self,
+        mut req: http::request::Builder,
+        checksum: &str,
+    ) -> http::request::Builder {
+        if let Some(checksum_algorithm) = self.checksum_algorithm.as_ref() {
+            req = req.header(checksum_algorithm.to_header_name(), checksum);
+        }
+        req
+    }
 }
 
 impl OssCore {
@@ -261,6 +289,12 @@ impl OssCore {
 
         // set sse headers
         req = self.insert_sse_headers(req);
+
+        // Calculate Checksum.
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            // Set Checksum header.
+            req = self.insert_checksum_header(req, &checksum);
+        }
 
         let req = req.body(body).map_err(new_request_build_error)?;
         Ok(req)
@@ -289,6 +323,12 @@ impl OssCore {
 
         // set sse headers
         req = self.insert_sse_headers(req);
+
+        // Calculate Checksum.
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            // Set Checksum header.
+            req = self.insert_checksum_header(req, &checksum);
+        }
 
         let req = req.body(body).map_err(new_request_build_error)?;
         Ok(req)
@@ -599,6 +639,11 @@ impl OssCore {
 
         let mut req = Request::put(&url);
         req = req.header(CONTENT_LENGTH, size);
+        // Calculate Checksum.
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            // Set Checksum header.
+            req = self.insert_checksum_header(req, &checksum);
+        }
         let mut req = req.body(body).map_err(new_request_build_error)?;
         self.sign(&mut req).await?;
         self.send(req).await
@@ -835,6 +880,30 @@ impl From<OpPutObjTag> for Tagging {
         Tagging {
             tag_set: TagSet { tag: Some(tag) },
         }
+    }
+}
+
+#[derive(PartialEq)]
+#[derive(Debug)]
+pub enum ChecksumAlgorithm {
+    Md5,
+}
+impl ChecksumAlgorithm {
+    pub fn to_header_name(&self) -> HeaderName {
+        match self {
+            Self::Md5 => HeaderName::try_from("Content-MD5").expect("Invalid header name for Md5"),
+        }
+    }
+}
+impl Display for ChecksumAlgorithm {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Md5 => "MD5",
+            }
+        )
     }
 }
 

@@ -43,6 +43,8 @@ use reqsign::AwsCredentialLoad;
 use reqsign::AwsV4Signer;
 use serde::Deserialize;
 use serde::Serialize;
+use md5::{Md5, Digest};
+use crc32fast::Hasher;
 
 use crate::raw::*;
 use crate::*;
@@ -264,7 +266,19 @@ impl S3Core {
                 body.clone()
                     .for_each(|b| crc = crc32c::crc32c_append(crc, &b));
                 Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
-            }
+            },
+            Some(ChecksumAlgorithm::Crc32) => {
+                let mut hasher = Hasher::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize() + 1;
+                Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
+            },
+            Some(ChecksumAlgorithm::Md5) => {
+                let mut hasher = Md5::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest))
+            },
         }
     }
     pub fn insert_checksum_header(
@@ -283,7 +297,9 @@ impl S3Core {
         mut req: http::request::Builder,
     ) -> http::request::Builder {
         if let Some(checksum_algorithm) = self.checksum_algorithm.as_ref() {
-            req = req.header("x-amz-checksum-algorithm", checksum_algorithm.to_string());
+            if checksum_algorithm != &ChecksumAlgorithm::Md5 {
+                req = req.header("x-amz-checksum-algorithm", checksum_algorithm.to_string());
+            }
         }
         req
     }
@@ -972,6 +988,8 @@ pub struct CompleteMultipartUploadRequestPart {
     pub etag: String,
     #[serde(rename = "ChecksumCRC32C", skip_serializing_if = "Option::is_none")]
     pub checksum_crc32c: Option<String>,
+    #[serde(rename = "ChecksumCRC32", skip_serializing_if = "Option::is_none")]
+    pub checksum_crc32: Option<String>,
 }
 
 /// Request of DeleteObjects.
@@ -1130,13 +1148,19 @@ impl From<OpPutObjTag> for Tagging {
     }
 }
 
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub enum ChecksumAlgorithm {
     Crc32c,
+    Crc32,
+    Md5,
 }
 impl ChecksumAlgorithm {
     pub fn to_header_name(&self) -> HeaderName {
         match self {
             Self::Crc32c => HeaderName::from_static("x-amz-checksum-crc32c"),
+            Self::Crc32 => HeaderName::from_static("x-amz-checksum-crc32"),
+            Self::Md5 => HeaderName::try_from("Content-MD5").expect("Invalid header name for Md5"),
         }
     }
 }
@@ -1147,6 +1171,8 @@ impl Display for ChecksumAlgorithm {
             "{}",
             match self {
                 Self::Crc32c => "CRC32C",
+                Self::Crc32 => "CRC32",
+                Self::Md5 => "MD5",
             }
         )
     }

@@ -29,6 +29,7 @@ TEST_F(ObDalTest, test_rw)
 
   /* Write this into path "/testpath" */
   opendal_error *error = opendal_operator_write(op_, path.c_str(), &data);
+  dump_error(error);
   ASSERT_EQ(error, nullptr);
 
   /* We can read it out, make sure the data is the same */

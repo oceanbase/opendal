@@ -65,10 +65,7 @@ impl opendal_writer {
                 },
                 Err(e) => opendal_result_writer_write {
                     size: 0,
-                    error: opendal_error::new(
-                        core::Error::new(core::ErrorKind::Unexpected, "write failed from writer")
-                            .set_source(e),
-                    ),
+                    error: opendal_error::new(e),
                 },
             }
         }));
@@ -102,10 +99,7 @@ impl opendal_writer {
                 },
                 Err(e) => opendal_result_writer_write {
                     size: 0,
-                    error: opendal_error::new(
-                        core::Error::new(core::ErrorKind::Unexpected, "write_with_offset failed from writer")
-                            .set_source(e),
-                    ),
+                    error: opendal_error::new(e),
                 },
             }
         }));

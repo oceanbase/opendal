@@ -82,13 +82,7 @@ impl opendal_multipart_writer {
                 },
                 Err(e) => opendal_result_writer_write {
                     size: 0,
-                    error: opendal_error::new(
-                        core::Error::new(
-                            core::ErrorKind::Unexpected,
-                            "write failed from multipart writer",
-                        )
-                        .set_source(e),
-                    ),
+                    error: opendal_error::new(e),
                 },
             }
         }));
