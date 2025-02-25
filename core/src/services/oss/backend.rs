@@ -302,6 +302,16 @@ impl OssBuilder {
 
         self
     }
+
+    /// Set checksum algorithm of this backend.
+    ///
+    /// Available options:
+    /// - "md5"
+    pub fn checksum_algorithm(mut self, checksum_algorithm: &str) -> Self {
+        self.config.checksum_algorithm = Some(checksum_algorithm.to_string());
+
+        self
+    }
 }
 
 impl Builder for OssBuilder {
@@ -385,6 +395,17 @@ impl Builder for OssBuilder {
             cfg.sts_endpoint = Some(v);
         }
 
+        let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {
+            Some("md5") => Some(ChecksumAlgorithm::Md5),
+            None => None,
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::ConfigInvalid,
+                    "{v} is not a supported checksum_algorithm.",
+                ))
+            }
+        };
+
         let client = if let Some(client) = self.http_client {
             client
         } else {
@@ -417,6 +438,7 @@ impl Builder for OssBuilder {
                 server_side_encryption,
                 server_side_encryption_key_id,
                 delete_max_size,
+                checksum_algorithm,
             }),
         })
     }

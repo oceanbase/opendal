@@ -95,6 +95,8 @@ pub enum ErrorKind {
     RegionMismatch,
     /// http request timed out.
     TimedOut,
+    /// checksum type is not supported
+    ChecksumUnsupported,
 }
 
 impl ErrorKind {
@@ -129,6 +131,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::ChecksumError => "ChecksumError",
             ErrorKind::RegionMismatch => "RegionMismatch",
             ErrorKind::TimedOut => "TimedOut",
+            ErrorKind::ChecksumUnsupported => "ChecksumUnsupported",
         }
     }
 }

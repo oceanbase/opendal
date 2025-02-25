@@ -58,6 +58,8 @@ pub enum opendal_code {
     OPENDAL_REGION_MISMATCH,
     /// The operation is timed out.
     OPENDAL_TIMED_OUT,
+    /// checksum type is not supported
+    OPENDAL_CHECKSUM_UNSUPPORTED,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -79,6 +81,7 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::ChecksumError => opendal_code::OPENDAL_CHECKSUM_ERROR,
             core::ErrorKind::RegionMismatch => opendal_code::OPENDAL_REGION_MISMATCH,
             core::ErrorKind::TimedOut => opendal_code::OPENDAL_TIMED_OUT,
+            core::ErrorKind::ChecksumUnsupported => opendal_code::OPENDAL_CHECKSUM_UNSUPPORTED,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(

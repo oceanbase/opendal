@@ -93,6 +93,9 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     if code == "InvalidRequest" && msg.contains("x-amz-checksum") {
         return Some((ErrorKind::ChecksumError, false))
     }
+    if code == "BadDigest" {
+        return Some((ErrorKind::ChecksumError, false))
+    }
     // in virtual-hosted mode, Invalid Request is returned when use obdal to access
     // cos with a wrong bucket name.
     if code == "InvalidRequest" && msg.contains("<bucketname>-<appid>") {

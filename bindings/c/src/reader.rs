@@ -94,10 +94,7 @@ impl opendal_reader {
                 },
                 Err(e) => opendal_result_reader_read {
                     size: 0,
-                    error: opendal_error::new(
-                        core::Error::new(core::ErrorKind::Unexpected, "read failed from reader")
-                            .set_source(e),
-                    ),
+                    error: opendal_error::new(e),
                 },
             }
         }));

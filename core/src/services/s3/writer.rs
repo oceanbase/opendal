@@ -59,7 +59,22 @@ impl oio::MultipartWrite for S3Writer {
         let status = resp.status();
 
         match status {
-            StatusCode::CREATED | StatusCode::OK => Ok(()),
+            StatusCode::CREATED | StatusCode::OK => {
+                if let Some(checksum_algorithm) = self.core.checksum_algorithm.as_ref() {
+                    if checksum_algorithm != &ChecksumAlgorithm::Md5 {
+                        let header_name = checksum_algorithm.to_header_name();
+                        let header_name_str = header_name.as_str();
+                        let _ = parse_header_to_str(resp.headers(), header_name_str)?
+                            .ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::ChecksumUnsupported,
+                                    "checksum not present in returning response",
+                                )
+                            })?;
+                    }
+                }
+                Ok(())
+            },
             _ => Err(parse_error(resp)),
         }
     }
@@ -123,6 +138,20 @@ impl oio::MultipartWrite for S3Writer {
                     })?
                     .to_string();
 
+                if let Some(checksum_algorithm) = self.core.checksum_algorithm.as_ref() {
+                    if checksum_algorithm != &ChecksumAlgorithm::Md5 {
+                        let header_name = checksum_algorithm.to_header_name();
+                        let header_name_str = header_name.as_str();
+                        let _ = parse_header_to_str(resp.headers(), header_name_str)?
+                            .ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::ChecksumUnsupported,
+                                    "checksum not present in returning response",
+                                )
+                            })?;
+                    }
+                }
+
                 Ok(oio::MultipartPart {
                     part_number,
                     etag,
@@ -147,6 +176,18 @@ impl oio::MultipartWrite for S3Writer {
                         part_number: p.part_number,
                         etag: p.etag.clone(),
                         checksum_crc32c: p.checksum.clone(),
+                        checksum_crc32: None,
+                    },
+                    ChecksumAlgorithm::Crc32 => CompleteMultipartUploadRequestPart {
+                        part_number: p.part_number,
+                        etag: p.etag.clone(),
+                        checksum_crc32c: None,
+                        checksum_crc32: p.checksum.clone(),
+                    },
+                    ChecksumAlgorithm::Md5 => CompleteMultipartUploadRequestPart {
+                        part_number: p.part_number,
+                        etag: p.etag.clone(),
+                        ..Default::default()
                     },
                 },
             })

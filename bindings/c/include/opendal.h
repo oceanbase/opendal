@@ -96,6 +96,10 @@ typedef enum opendal_code {
    * The operation is timed out.
    */
   OPENDAL_TIMED_OUT,
+  /**
+   * checksum type is not supported
+   */
+  OPENDAL_CHECKSUM_UNSUPPORTED,
 } opendal_code;
 
 /**

@@ -5005,6 +5005,7 @@ dependencies = [
  "chrono",
  "compio",
  "crc32c",
+ "crc32fast",
  "criterion",
  "dashmap 6.1.0",
  "dotenvy",
