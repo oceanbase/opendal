@@ -139,12 +139,15 @@ impl<A: Access> LayeredAccess for ImmutableIndexAccessor<A> {
     type Inner = A;
     type Reader = A::Reader;
     type Writer = A::Writer;
+    type ObMultipartWriter = A::ObMultipartWriter;
     type Lister = ImmutableDir;
     type Deleter = A::Deleter;
     type BlockingReader = A::BlockingReader;
     type BlockingWriter = A::BlockingWriter;
     type BlockingLister = ImmutableDir;
     type BlockingDeleter = A::BlockingDeleter;
+    type BlockingObMultipartWriter = A::BlockingObMultipartWriter;
+
 
     fn inner(&self) -> &Self::Inner {
         &self.inner
@@ -167,6 +170,10 @@ impl<A: Access> LayeredAccess for ImmutableIndexAccessor<A> {
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
         self.inner.write(path, args).await
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner.ob_multipart_write(path, args).await
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
@@ -194,6 +201,10 @@ impl<A: Access> LayeredAccess for ImmutableIndexAccessor<A> {
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
         self.inner.blocking_write(path, args)
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner.blocking_ob_multipart_write(path, args)
     }
 
     fn blocking_list(&self, path: &str, args: OpList) -> Result<(RpList, Self::BlockingLister)> {

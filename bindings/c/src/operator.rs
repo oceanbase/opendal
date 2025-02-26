@@ -17,20 +17,271 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::ffi::CString;
+use std::fmt::Write;
 use std::os::raw::c_char;
+use std::panic::catch_unwind;
 use std::str::FromStr;
+use std::sync::RwLock;
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::time::Duration;
+use tracing::field::Field;
+use tracing::{span, Event, Subscriber};
+use tracing_subscriber;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt};
 
 use ::opendal as core;
-use once_cell::sync::Lazy;
+use core::Configurator;
+use core::Builder;
+use core::layers::TimeoutLayer;
+use core::raw::HttpClient;
+use core::ErrorKind;
 
 use super::*;
 
-static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-});
+static RUNTIME: RwLock<Option<tokio::runtime::Runtime>> = RwLock::new(None);
+
+static HTTP_CLIENT: RwLock<Option<HttpClient>> = RwLock::new(None);
+
+pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
+pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
+static mut ALLOC_FN: Option<AllocFn> = None;
+static mut FREE_FN: Option<FreeFn> = None;
+
+struct CustomAllocator;
+
+unsafe impl GlobalAlloc for CustomAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if let Some(alloc_fn) = ALLOC_FN {
+            alloc_fn(layout.size(), layout.align())
+        } else {
+            System.alloc(layout)
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if let Some(free_fn) = FREE_FN {
+            if !ptr.is_null() {
+                free_fn(ptr);
+            }
+        } else {
+            System.dealloc(ptr, layout)
+        }
+    }
+}
+
+struct ObLogLayer;
+
+pub type LogHandler = unsafe extern "C" fn(level: *const c_char, message: *const c_char);
+static mut OB_LOG_HANDLER: Option<LogHandler> = None;
+
+impl<S> Layer<S> for ObLogLayer
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event, ctx: Context<S>) {
+        let mut message = String::new();
+
+        let metadata = event.metadata();
+
+        match (metadata.file(), metadata.line()) {
+            (Some(file), Some(line)) => {
+                let _ = write!(&mut message, "location={}:{}", file, line);
+            }
+            (Some(file), None) => {
+                let _ = write!(&mut message, "file={}", file);
+            }
+            (None, Some(line)) => {
+                let _ = write!(&mut message, "line={}", line);
+            }
+            (None, None) => {
+            }
+        };
+
+        event.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
+            let _ = write!(&mut message, ", {}: {:?}", field.name(), value);
+        });
+
+        if let Some(current_span) = ctx.current_span().id() {
+            if let Some(span_ref) = ctx.span(current_span) {
+                if let Some(fields) = span_ref.extensions().get::<HashMap<String, String>>() {
+                    for (name, value) in fields {
+                        let _ = write!(&mut message, ", {}: {}", name, value);
+                    }
+                }
+            }
+        }
+
+        match (
+            CString::new(metadata.level().to_string()),
+            CString::new(message),
+        ) {
+            (Ok(level), Ok(message)) => unsafe {
+                if let Some(loghandler) = OB_LOG_HANDLER {
+                    loghandler(level.as_ptr(), message.as_ptr());
+                }
+            },
+            _ => {}
+        }
+    }
+
+    fn on_new_span(
+        &self,
+        attrs: &span::Attributes<'_>,
+        id: &span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let span = ctx.span(id).expect("Span must exist!");
+        let mut extensions = span.extensions_mut();
+
+        let mut fields = HashMap::new();
+        attrs.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
+            fields.insert(field.name().to_string(), format!("{:?}", value));
+        });
+
+        extensions.insert(fields);
+    }
+}
+
+#[global_allocator]
+static GLOBAL: CustomAllocator = CustomAllocator;
+
+#[no_mangle]
+pub extern "C" fn opendal_init_env(
+    alloc: *mut c_void,
+    free: *mut c_void,
+    loghandler: *mut c_void,
+    thread_cnt: usize,
+    pool_max_idle_per_host: usize,
+    pool_max_idle_time_s: u64,
+) -> *mut opendal_error {
+    let ret = catch_unwind(|| {
+        let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
+            Some(unsafe { std::mem::transmute(alloc) })
+        } else {
+            None
+        };
+
+        let free_fn: Option<FreeFn> = if !free.is_null() {
+            Some(unsafe { std::mem::transmute(free) })
+        } else {
+            None
+        };
+
+        let loghandler_fn: Option<LogHandler> = if !loghandler.is_null() {
+            Some(unsafe { std::mem::transmute(loghandler) })
+        } else {
+            None
+        };
+
+        if alloc_fn.is_none() || free_fn.is_none() {
+            let err = core::Error::new(core::ErrorKind::ConfigInvalid, "invalid mem func");
+            return opendal_error::new(err);
+        }
+
+        unsafe {
+            ALLOC_FN = alloc_fn;
+            FREE_FN = free_fn;
+            OB_LOG_HANDLER = loghandler_fn;
+        }
+
+        let mut global_runtime = RUNTIME.write().expect("failed to lock global RUNTIME");
+        match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(thread_cnt as usize)
+            .thread_name("obdal")
+            .enable_all()
+            .build() {
+            Ok(runtime) => *global_runtime = Some(runtime),
+            Err(e) => {
+                return opendal_error::new(
+                    core::Error::new(
+                        core::ErrorKind::Unexpected, format!("failed to build tokio runtime: {}", e.to_string())
+                    )
+                )
+            }
+        }
+
+        let client = reqwest::Client::builder()
+                .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
+                .pool_max_idle_per_host(pool_max_idle_per_host)
+                .build();
+        match client {
+            Ok(client) => {
+                let mut http_client = HTTP_CLIENT.write().expect("failed to lock global HTTP_CLIENT");
+                *http_client = Some(HttpClient::with(client));
+            }
+            Err(e) => {
+                return opendal_error::new(core::Error::new(
+                    core::ErrorKind::Unexpected,
+                    format!("failed to build reqwest client: {}", e.to_string()),
+                ));
+            }
+        }
+
+        if loghandler_fn.is_none() {
+            let timer = OffsetTime::local_rfc_3339();
+            if let Err(e) = timer {
+                return opendal_error::new(core::Error::new(
+                    core::ErrorKind::Unexpected,
+                    format!("{}, {}", e.to_string(), "failed to get local offset"),
+                ));
+            }
+            match tracing_subscriber::registry()
+                .with(fmt::layer().pretty().with_timer(timer.unwrap()))
+                .try_init()
+            {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => {
+                    unsafe {
+                        ALLOC_FN = None;
+                        FREE_FN = None;
+                        OB_LOG_HANDLER = None;
+                    }
+                    let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                    opendal_error::new(err)
+                }
+            }
+        } else {
+            match tracing_subscriber::registry().with(ObLogLayer).try_init() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => {
+                    unsafe {
+                        ALLOC_FN = None;
+                        FREE_FN = None;
+                        OB_LOG_HANDLER = None;
+                    }
+                    let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                    opendal_error::new(err)
+                }
+            }
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+/// TODO
+pub fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
+    if path.is_null() {
+        return Err(opendal_error::new(core::Error::new(
+            core::ErrorKind::ConfigInvalid,
+            "invalid args",
+        )));
+    }
+
+    let c_str = unsafe { std::ffi::CStr::from_ptr(path) };
+    match c_str.to_str() {
+        Ok(valid_str) => Ok(valid_str),
+        Err(e) => Err(opendal_error::new(
+            core::Error::new(core::ErrorKind::ConfigInvalid, "invalid args").set_source(e),
+        )),
+    }
+}
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -76,10 +327,14 @@ impl opendal_operator {
     /// ```
     #[no_mangle]
     pub unsafe extern "C" fn opendal_operator_free(ptr: *const opendal_operator) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingOperator));
-            drop(Box::from_raw(ptr as *mut opendal_operator));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingOperator));
+                drop(Box::from_raw(ptr as *mut opendal_operator));
+            }
+        });
+
+        handle_result_without_ret(ret);
     }
 }
 
@@ -87,16 +342,65 @@ fn build_operator(
     schema: core::Scheme,
     map: HashMap<String, String>,
 ) -> core::Result<core::Operator> {
-    let mut op = match core::Operator::via_iter(schema, map) {
-        Ok(o) => o,
-        Err(e) => return Err(e),
+    let timeout: u64 = map
+        .get("timeout")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60);
+
+    // TODO 简化代码，由于个别 service 没有 http_client 方法，无法直接基于 `Operator::via_iter` 函数修改
+    let mut op = match schema {
+        core::Scheme::S3 => {
+            let mut builder: core::services::S3 =
+            core::services::S3Config::from_iter(map)?.into_builder();
+            let http_client = HTTP_CLIENT.read().map_err(|_| {
+                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+            })?;
+            if let Some(client) = http_client.as_ref() {
+                builder = builder.http_client(client.clone());
+            }
+            let acc = builder.build()?;
+            core::OperatorBuilder::new(acc).finish()
+        }
+        core::Scheme::Oss => {
+            let mut builder: core::services::Oss =
+            core::services::OssConfig::from_iter(map)?.into_builder();
+            let http_client = HTTP_CLIENT.read().map_err(|_| {
+                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+            })?;
+            if let Some(client) = http_client.as_ref() {
+                builder = builder.http_client(client.clone());
+            }
+            let acc = builder.build()?;
+            core::OperatorBuilder::new(acc).finish()
+        }
+        v => {
+            return Err(core::Error::new(
+                core::ErrorKind::Unsupported,
+                "scheme is not enabled or supported",
+            )
+            .with_context("scheme", v))
+        }
     };
+
+    op = op.layer(core::layers::TracingLayer);
+    op = op.layer(
+        TimeoutLayer::new()
+            .with_timeout(Duration::from_secs(timeout))
+            .with_io_timeout(Duration::from_secs(timeout)),
+    );
     if !op.info().full_capability().blocking {
-        let runtime =
-            tokio::runtime::Handle::try_current().unwrap_or_else(|_| RUNTIME.handle().clone());
-        let _guard = runtime.enter();
-        op = op
-            .layer(core::layers::BlockingLayer::create().expect("blocking layer must be created"));
+        if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
+            let handle =
+                tokio::runtime::Handle::try_current().unwrap_or_else(|_| (*runtime).handle().clone());
+            let _guard = handle.enter();
+            let blocking_layer = core::layers::BlockingLayer::create()?;
+            op = op.layer(blocking_layer);
+        } else {
+            return Err(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "failed to get global RUNTIME, obdal env maybe not inited",
+            ));
+        }
     }
     Ok(op)
 }
@@ -143,37 +447,51 @@ pub unsafe extern "C" fn opendal_operator_new(
     scheme: *const c_char,
     options: *const opendal_operator_options,
 ) -> opendal_result_operator_new {
-    assert!(!scheme.is_null());
-    let scheme = std::ffi::CStr::from_ptr(scheme)
-        .to_str()
-        .expect("malformed scheme");
-    let scheme = match core::Scheme::from_str(scheme) {
-        Ok(s) => s,
-        Err(e) => {
-            return opendal_result_operator_new {
+    let ret = catch_unwind(|| {
+        let scheme = match c_char_to_str(scheme) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+        let scheme = match core::Scheme::from_str(scheme) {
+            Ok(s) => s,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: opendal_error::new(e),
+                };
+            }
+        };
+
+        let mut map = HashMap::<String, String>::default();
+        if !options.is_null() {
+            for (k, v) in (*options).deref() {
+                map.insert(k.to_string(), v.to_string());
+            }
+        }
+
+        match build_operator(scheme, map) {
+            Ok(op) => opendal_result_operator_new {
+                op: Box::into_raw(Box::new(opendal_operator {
+                    inner: Box::into_raw(Box::new(op.blocking())) as _,
+                })),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_operator_new {
                 op: std::ptr::null_mut(),
                 error: opendal_error::new(e),
-            };
+            },
         }
-    };
-
-    let mut map = HashMap::<String, String>::default();
-    if !options.is_null() {
-        for (k, v) in (*options).deref() {
-            map.insert(k.to_string(), v.to_string());
-        }
-    }
-
-    match build_operator(scheme, map) {
-        Ok(op) => opendal_result_operator_new {
-            op: Box::into_raw(Box::new(opendal_operator {
-                inner: Box::into_raw(Box::new(op.blocking())) as _,
-            })),
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_operator_new {
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_new {
             op: std::ptr::null_mut(),
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -228,13 +546,22 @@ pub unsafe extern "C" fn opendal_operator_write(
     path: *const c_char,
     bytes: &opendal_bytes,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().write(path, bytes) {
-        Ok(_) => std::ptr::null_mut(),
-        Err(e) => opendal_error::new(e),
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        match op.deref().write(path, bytes) {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
     }
 }
 
@@ -282,18 +609,33 @@ pub unsafe extern "C" fn opendal_operator_read(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_read {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().read(path) {
-        Ok(b) => opendal_result_read {
-            data: opendal_bytes::new(b),
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_read {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_read {
+                    data: opendal_bytes::empty(),
+                    error: e,
+                };
+            }
+        };
+
+        match op.deref().read(path) {
+            Ok(b) => opendal_result_read {
+                data: opendal_bytes::new(b),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_read {
+                data: opendal_bytes::empty(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_read {
             data: opendal_bytes::empty(),
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -339,28 +681,33 @@ pub unsafe extern "C" fn opendal_operator_reader(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_operator_reader {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    let reader = match op.deref().reader(path) {
-        Ok(reader) => reader,
-        Err(err) => {
-            return opendal_result_operator_reader {
-                reader: std::ptr::null_mut(),
-                error: opendal_error::new(err),
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_reader {
+                    reader: std::ptr::null_mut(),
+                    error: e,
+                };
             }
-        }
-    };
+        };
 
-    match reader.into_std_read(..) {
-        Ok(reader) => opendal_result_operator_reader {
-            reader: Box::into_raw(Box::new(opendal_reader::new(reader))),
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_operator_reader {
+        match op.deref().reader(path) {
+            Ok(reader) => opendal_result_operator_reader {
+                reader: Box::into_raw(Box::new(opendal_reader::new(reader))),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_operator_reader {
+                reader: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_reader {
             reader: std::ptr::null_mut(),
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -406,23 +753,140 @@ pub unsafe extern "C" fn opendal_operator_writer(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_operator_writer {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    let writer = match op.deref().writer(path) {
-        Ok(writer) => writer,
-        Err(err) => {
-            return opendal_result_operator_writer {
-                writer: std::ptr::null_mut(),
-                error: opendal_error::new(err),
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_writer {
+                    writer: std::ptr::null_mut(),
+                    error: e,
+                };
             }
-        }
-    };
+        };
 
-    opendal_result_operator_writer {
-        writer: Box::into_raw(Box::new(opendal_writer::new(writer))),
-        error: std::ptr::null_mut(),
+        let writer = match op.deref().writer(path) {
+            Ok(writer) => writer,
+            Err(err) => {
+                return opendal_result_operator_writer {
+                    writer: std::ptr::null_mut(),
+                    error: opendal_error::new(err),
+                }
+            }
+        };
+
+        opendal_result_operator_writer {
+            writer: Box::into_raw(Box::new(opendal_writer::new(writer))),
+            error: std::ptr::null_mut(),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_writer {
+            writer: std::ptr::null_mut(),
+            error,
+        },
+    }
+}
+
+///
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_append_writer(
+    op: &opendal_operator,
+    path: *const c_char,
+) -> opendal_result_operator_writer {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_writer {
+                    writer: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+
+        let writer = match op.deref().writer_with(path).append(true).call() {
+            Ok(writer) => writer,
+            Err(err) => {
+                return opendal_result_operator_writer {
+                    writer: std::ptr::null_mut(),
+                    error: opendal_error::new(err),
+                }
+            }
+        };
+
+        opendal_result_operator_writer {
+            writer: Box::into_raw(Box::new(opendal_writer::new(writer))),
+            error: std::ptr::null_mut(),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_writer {
+            writer: std::ptr::null_mut(),
+            error,
+        },
+    }
+}
+
+/// \brief Blocking create a ob_multipart_writer for the specified path.
+///
+/// ob_multipart_writer is designed to enable writing with a part ID. Although Opendal's
+/// MultipartWriter automatically performs uploads based on buffer conditions, to maintain
+/// compatibilty with ob's existing code logic, it is necessary to expose a method for
+/// uplaoding with a specified part_id.
+///
+/// This function prepares a ob_multipart_writer that can be used to write data to the
+/// specified path using the provided operator. If successful, it returns a valid
+/// ob_multipart_writer; otherwise, it returns an error.
+///
+/// @param op The opendal_operator created previously
+/// @param path The designated path where the writer will be used
+/// @see opendal_operator
+/// @see opendal_result_operator_multipart_writer.
+/// @see opendal_error
+/// @return Returns opendal_result_operator_multipart_writer, containing a multipart_writer
+/// and an opendal_error.
+/// If the operation succeeds, the `multipart_writer` field holds a valid writer and the `error` field
+/// is null. Otherwise, the `multipart_writer` will be null and the `error` will be set correspondingly.
+
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_multipart_writer(
+    op: &opendal_operator,
+    path: *const c_char,
+) -> opendal_result_operator_multipart_writer {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_multipart_writer {
+                    multipart_writer: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+
+        let writer = match op.deref().ob_multipart_writer(path) {
+            Ok(writer) => writer,
+            Err(err) => {
+                return opendal_result_operator_multipart_writer {
+                    multipart_writer: std::ptr::null_mut(),
+                    error: opendal_error::new(err),
+                }
+            }
+        };
+
+        opendal_result_operator_multipart_writer {
+            multipart_writer: Box::into_raw(Box::new(opendal_multipart_writer::new(writer))),
+            error: std::ptr::null_mut(),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_multipart_writer {
+            multipart_writer: std::ptr::null_mut(),
+            error,
+        },
     }
 }
 
@@ -471,13 +935,104 @@ pub unsafe extern "C" fn opendal_operator_delete(
     op: &opendal_operator,
     path: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().delete(path) {
-        Ok(_) => std::ptr::null_mut(),
-        Err(e) => opendal_error::new(e),
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+        match op.deref().delete(path) {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+/// \brief Blocking put tagging to object in `path`
+///
+/// Put tagging to object in `path` blocking by `op_ptr`
+/// Error is NULL if successful, otherwise it contains the error code and error message.
+///
+/// @param op The opendal_operator created previously
+/// @param path The designated path you want to put tagging to
+/// @param tagging The tagging you want to put
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_put_object_tagging(
+    op: &opendal_operator,
+    path: *const c_char,
+    tagging: &opendal_object_tagging,
+) -> *mut opendal_error {
+    let ret = catch_unwind(|| {
+        if path.is_null() {
+            return opendal_error::new(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "invalid args",
+            ));
+        }
+
+        let path = std::ffi::CStr::from_ptr(path)
+            .to_str()
+            .expect("malformed path");
+
+        match op
+            .deref()
+            .put_object_tagging_with(path)
+            .tag_set(HashMap::from(tagging))
+            .call()
+        {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+//TODO
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_get_object_tagging(
+    op: &opendal_operator,
+    path: *const c_char,
+) -> opendal_result_get_object_tagging {
+    let ret = catch_unwind(|| {
+        if path.is_null() {
+            return opendal_result_get_object_tagging {
+                tagging: std::ptr::null_mut(),
+                error: opendal_error::new(core::Error::new(
+                    core::ErrorKind::ConfigInvalid,
+                    "invalid_args",
+                )),
+            };
+        }
+
+        let path = std::ffi::CStr::from_ptr(path)
+            .to_str()
+            .expect("malformed path");
+
+        match op.deref().get_object_tagging(path) {
+            Ok(hashmap) => opendal_result_get_object_tagging {
+                tagging: opendal_object_tagging::from_hashmap(hashmap),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_get_object_tagging {
+                tagging: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_get_object_tagging {
+            tagging: std::ptr::null_mut(),
+            error,
+        },
     }
 }
 
@@ -524,18 +1079,32 @@ pub unsafe extern "C" fn opendal_operator_is_exist(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_is_exist {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().exists(path) {
-        Ok(e) => opendal_result_is_exist {
-            is_exist: e,
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_is_exist {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_is_exist {
+                    is_exist: false,
+                    error: e,
+                };
+            }
+        };
+        match op.deref().exists(path) {
+            Ok(e) => opendal_result_is_exist {
+                is_exist: e,
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_is_exist {
+                is_exist: false,
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_is_exist {
             is_exist: false,
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -582,18 +1151,32 @@ pub unsafe extern "C" fn opendal_operator_exists(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_exists {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().exists(path) {
-        Ok(e) => opendal_result_exists {
-            exists: e,
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_exists {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_exists {
+                    exists: false,
+                    error: e,
+                };
+            }
+        };
+        match op.deref().exists(path) {
+            Ok(e) => opendal_result_exists {
+                exists: e,
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_exists {
+                exists: false,
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_exists {
             exists: false,
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -639,18 +1222,32 @@ pub unsafe extern "C" fn opendal_operator_stat(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_stat {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().stat(path) {
-        Ok(m) => opendal_result_stat {
-            meta: Box::into_raw(Box::new(opendal_metadata::new(m))),
-            error: std::ptr::null_mut(),
-        },
-        Err(e) => opendal_result_stat {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_stat {
+                    meta: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+        match op.deref().stat(path) {
+            Ok(m) => opendal_result_stat {
+                meta: Box::into_raw(Box::new(opendal_metadata::new(m))),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_stat {
+                meta: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_stat {
             meta: std::ptr::null_mut(),
-            error: opendal_error::new(e),
+            error,
         },
     }
 }
@@ -707,19 +1304,94 @@ pub unsafe extern "C" fn opendal_operator_stat(
 pub unsafe extern "C" fn opendal_operator_list(
     op: &opendal_operator,
     path: *const c_char,
+    limit: usize,
+    recursive: bool,
+    start_after: *const c_char,
 ) -> opendal_result_list {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    match op.deref().lister(path) {
-        Ok(lister) => opendal_result_list {
-            lister: Box::into_raw(Box::new(opendal_lister::new(lister))),
+    let ret = catch_unwind(|| {
+        if limit == 0 {
+            return opendal_result_list {
+                lister: std::ptr::null_mut(),
+                error: opendal_error::new(core::Error::new(
+                    core::ErrorKind::ConfigInvalid,
+                    "invalid args",
+                )),
+            };
+        }
+
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_list {
+                    lister: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+
+        let start_after = if start_after.is_null() {
+            ""
+        } else {
+            match c_char_to_str(start_after) {
+                Ok(valid_str) => valid_str,
+                Err(e) => {
+                    return opendal_result_list {
+                        lister: std::ptr::null_mut(),
+                        error: e,
+                    };
+                }
+            }
+        };
+
+        match op
+            .deref()
+            .lister_with(path)
+            .limit(limit)
+            .recursive(recursive)
+            .start_after(start_after)
+            .call()
+        {
+            Ok(lister) => opendal_result_list {
+                lister: Box::into_raw(Box::new(opendal_lister::new(lister))),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_list {
+                lister: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_list {
+            lister: std::ptr::null_mut(),
+            error,
+        },
+    }
+}
+
+/// TODO
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_deleter(
+    op: &opendal_operator,
+) -> opendal_result_operator_deleter {
+    let ret = catch_unwind(|| match op.deref().deleter() {
+        Ok(deleter) => opendal_result_operator_deleter {
+            deleter: Box::into_raw(Box::new(opendal_deleter::new(deleter))),
             error: std::ptr::null_mut(),
         },
-        Err(e) => opendal_result_list {
-            lister: std::ptr::null_mut(),
+        Err(e) => opendal_result_operator_deleter {
+            deleter: std::ptr::null_mut(),
             error: opendal_error::new(e),
+        },
+    });
+
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_deleter {
+            deleter: std::ptr::null_mut(),
+            error,
         },
     }
 }
@@ -762,14 +1434,23 @@ pub unsafe extern "C" fn opendal_operator_create_dir(
     op: &opendal_operator,
     path: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!path.is_null());
-    let path = std::ffi::CStr::from_ptr(path)
-        .to_str()
-        .expect("malformed path");
-    if let Err(err) = op.deref().create_dir(path) {
-        opendal_error::new(err)
-    } else {
-        std::ptr::null_mut()
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+        if let Err(err) = op.deref().create_dir(path) {
+            opendal_error::new(err)
+        } else {
+            std::ptr::null_mut()
+        }
+    });
+
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(err) => err,
     }
 }
 
@@ -820,18 +1501,29 @@ pub unsafe extern "C" fn opendal_operator_rename(
     src: *const c_char,
     dest: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!src.is_null());
-    assert!(!dest.is_null());
-    let src = std::ffi::CStr::from_ptr(src)
-        .to_str()
-        .expect("malformed src");
-    let dest = std::ffi::CStr::from_ptr(dest)
-        .to_str()
-        .expect("malformed dest");
-    if let Err(err) = op.deref().rename(src, dest) {
-        opendal_error::new(err)
-    } else {
-        std::ptr::null_mut()
+    let ret = catch_unwind(|| {
+        let src = match c_char_to_str(src) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+        let dest = match c_char_to_str(dest) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        if let Err(err) = op.deref().rename(src, dest) {
+            opendal_error::new(err)
+        } else {
+            std::ptr::null_mut()
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(err) => err,
     }
 }
 
@@ -882,17 +1574,90 @@ pub unsafe extern "C" fn opendal_operator_copy(
     src: *const c_char,
     dest: *const c_char,
 ) -> *mut opendal_error {
-    assert!(!src.is_null());
-    assert!(!dest.is_null());
-    let src = std::ffi::CStr::from_ptr(src)
-        .to_str()
-        .expect("malformed src");
-    let dest = std::ffi::CStr::from_ptr(dest)
-        .to_str()
-        .expect("malformed dest");
-    if let Err(err) = op.deref().copy(src, dest) {
-        opendal_error::new(err)
+    let ret = catch_unwind(|| {
+        let src = match c_char_to_str(src) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+        let dest = match c_char_to_str(dest) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        if let Err(err) = op.deref().copy(src, dest) {
+            opendal_error::new(err)
+        } else {
+            std::ptr::null_mut()
+        }
+    });
+
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(err) => err,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
+    let result = std::panic::catch_unwind(|| {
+        panic!("This is a panic message!");
+    });
+
+    match handle_result(result) {
+        Ok(ret) => ret,
+        Err(err) => err,
+    }
+}
+
+/// \breif Handle the result of panic::catch_unwind
+/// if panic happens, return the error
+/// if not, return the result
+pub fn handle_result<T>(
+    result: Result<T, Box<dyn std::any::Any + Send>>,
+) -> Result<T, *mut opendal_error> {
+    match result {
+        Ok(ret) => Ok(ret),
+        Err(err) => {
+            if let Some(msg) = err.downcast_ref::<&str>() {
+                return Err(opendal_error::new(core::Error::new(
+                    ErrorKind::Unexpected,
+                    format!("Caught a panic: {}", msg),
+                )));
+            } else {
+                return Err(opendal_error::new(core::Error::new(
+                    ErrorKind::Unexpected,
+                    format!("Caught a panic without msg",),
+                )));
+            }
+        }
+    }
+}
+
+///
+pub fn dump_panic(err: Box<dyn std::any::Any + Send>) {
+    if let Some(msg) = err.downcast_ref::<&str>() {
+        tracing::error!("Caught a panic: {}", msg);
     } else {
-        std::ptr::null_mut()
+        tracing::error!("Caught a panic without msg");
+    }
+}
+
+/// \breif Handle the result of panic::catch_unwind
+/// if panic happens, log the error
+/// if not, return null
+pub fn handle_result_without_ret<T>(result: Result<T, Box<dyn std::any::Any + Send>>) -> () {
+    match result {
+        Ok(_) => (),
+        Err(err) => {
+            if let Some(msg) = err.downcast_ref::<&str>() {
+                tracing::error!("Caught a panic: {}", msg);
+            } else {
+                tracing::error!("Caught a panic without msg");
+            }
+        }
     }
 }

@@ -155,85 +155,10 @@ impl<A: Access> CompleteAccessor<A> {
     }
 
     async fn complete_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        let capability = self.info.full_capability();
-
-        if path == "/" {
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Forward to inner if create_dir is supported.
-        if path.ends_with('/') && capability.create_dir {
-            let meta = self.inner.stat(path, args).await?.into_metadata();
-
-            if meta.is_file() {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "stat expected a directory, but found a file",
-                ));
-            }
-
-            return Ok(RpStat::new(meta));
-        }
-
-        // Otherwise, we can simulate stat dir via `list`.
-        if path.ends_with('/') && capability.list_with_recursive {
-            let (_, mut l) = self
-                .inner
-                .list(path, OpList::default().with_recursive(true).with_limit(1))
-                .await?;
-
-            return if oio::List::next(&mut l).await?.is_some() {
-                Ok(RpStat::new(Metadata::new(EntryMode::DIR)))
-            } else {
-                Err(Error::new(
-                    ErrorKind::NotFound,
-                    "the directory is not found",
-                ))
-            };
-        }
-
-        // Forward to underlying storage directly since we don't know how to handle stat dir.
         self.inner.stat(path, args).await
     }
 
     fn complete_blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        let capability = self.info.full_capability();
-
-        if path == "/" {
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Forward to inner if create dir is supported.
-        if path.ends_with('/') && capability.create_dir {
-            let meta = self.inner.blocking_stat(path, args)?.into_metadata();
-
-            if meta.is_file() {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "stat expected a directory, but found a file",
-                ));
-            }
-
-            return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
-        }
-
-        // Otherwise, we can simulate stat a dir path via `list`.
-        if path.ends_with('/') && capability.list_with_recursive {
-            let (_, mut l) = self
-                .inner
-                .blocking_list(path, OpList::default().with_recursive(true).with_limit(1))?;
-
-            return if oio::BlockingList::next(&mut l)?.is_some() {
-                Ok(RpStat::new(Metadata::new(EntryMode::DIR)))
-            } else {
-                Err(Error::new(
-                    ErrorKind::NotFound,
-                    "the directory is not found",
-                ))
-            };
-        }
-
-        // Forward to underlying storage directly since we don't know how to handle stat dir.
         self.inner.blocking_stat(path, args)
     }
 
@@ -334,6 +259,8 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
     type BlockingReader = CompleteReader<A::BlockingReader>;
     type Writer = CompleteWriter<A::Writer>;
     type BlockingWriter = CompleteWriter<A::BlockingWriter>;
+    type ObMultipartWriter = CompleteObMultipartWriter<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = CompleteObMultipartWriter<A::BlockingObMultipartWriter>;
     type Lister = CompleteLister<A, A::Lister>;
     type BlockingLister = CompleteLister<A, A::BlockingLister>;
     type Deleter = A::Deleter;
@@ -371,6 +298,16 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
         Ok((rp, w))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let (rp, w) = self.inner.ob_multipart_write(path, args.clone()).await?;
+        let w = CompleteObMultipartWriter::new(w);
+        Ok((rp, w))
+    }
+
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.complete_stat(path, args).await
     }
@@ -402,6 +339,12 @@ impl<A: Access> LayeredAccess for CompleteAccessor<A> {
         self.inner
             .blocking_write(path, args)
             .map(|(rp, w)| (rp, CompleteWriter::new(w)))
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner
+            .blocking_ob_multipart_write(path, args)
+            .map(|(rp, w)| (rp, CompleteObMultipartWriter::new(w)))
     }
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
@@ -442,11 +385,13 @@ impl<R> CompleteReader<R> {
 
         match self.read.cmp(&size) {
             Ordering::Equal => Ok(()),
-            Ordering::Less => Err(
-                Error::new(ErrorKind::Unexpected, "reader got too little data")
-                    .with_context("expect", size)
-                    .with_context("actual", self.read),
-            ),
+            // OceanBase expects that no error is returned when the actual read size is less than the expected size.
+            Ordering::Less => Ok(()),
+            // Err(
+                // Error::new(ErrorKind::Unexpected, "reader got too little data")
+                //     .with_context("expect", size)
+                //     .with_context("actual", self.read),
+            // ),
             Ordering::Greater => Err(
                 Error::new(ErrorKind::Unexpected, "reader got too much data")
                     .with_context("expect", size)
@@ -517,6 +462,13 @@ where
         w.write(bs).await
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
+        })?; 
+        w.write_with_offset(offset, bs).await
+    }
+
     async fn close(&mut self) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
@@ -552,12 +504,122 @@ where
         w.write(bs)
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
+        })?;
+
+        w.write_with_offset(offset, bs) 
+    }
+
     fn close(&mut self) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
         })?;
 
         w.close()?;
+        self.inner = None;
+        Ok(())
+    }
+}
+
+pub struct CompleteObMultipartWriter<W> {
+    inner: Option<W>,
+}
+
+impl<W> CompleteObMultipartWriter<W> {
+    pub fn new(inner: W) -> CompleteObMultipartWriter<W> {
+        CompleteObMultipartWriter { inner: Some(inner) }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<W> Drop for CompleteObMultipartWriter<W> {
+    fn drop(&mut self) {
+        if self.inner.is_some() {
+            log::warn!("ob multipart writer has not been closed or aborted, must be a bug")
+        }
+    }
+}
+
+impl<W> oio::ObMultipartWrite for CompleteObMultipartWriter<W>
+where 
+    W: oio::ObMultipartWrite
+{
+    async fn initiate_part(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.initiate_part().await
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.write_with_part_id(bs, part_id).await
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.close().await?;
+        self.inner = None;
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.abort().await?;
+        self.inner = None;
+        Ok(())
+    }
+}
+
+
+impl<W> oio::BlockingObMultipartWrite for CompleteObMultipartWriter<W>
+where 
+    W: oio::BlockingObMultipartWrite
+{
+    fn initiate_part(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.initiate_part()
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.write_with_part_id(bs, part_id)
+    }
+
+    fn close(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.close()?;
+        self.inner = None;
+        Ok(())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        let w = self.inner.as_mut().ok_or_else(|| {
+            Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
+        })?;
+
+        w.abort()?;
         self.inner = None;
         Ok(())
     }

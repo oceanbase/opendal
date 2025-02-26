@@ -69,6 +69,8 @@ impl<A: Access> LayeredAccess for ErrorContextAccessor<A> {
     type BlockingReader = ErrorContextWrapper<A::BlockingReader>;
     type Writer = ErrorContextWrapper<A::Writer>;
     type BlockingWriter = ErrorContextWrapper<A::BlockingWriter>;
+    type ObMultipartWriter = ErrorContextWrapper<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = ErrorContextWrapper<A::BlockingObMultipartWriter>;
     type Lister = ErrorContextWrapper<A::Lister>;
     type BlockingLister = ErrorContextWrapper<A::BlockingLister>;
     type Deleter = ErrorContextWrapper<A::Deleter>;
@@ -122,6 +124,23 @@ impl<A: Access> LayeredAccess for ErrorContextAccessor<A> {
             })
             .map_err(|err| {
                 err.with_operation(Operation::Write)
+                    .with_context("service", self.info.scheme())
+                    .with_context("path", path)
+            })
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner
+            .ob_multipart_write(path, args)
+            .await
+            .map(|(rp, w)| {
+                (
+                    rp,
+                    ErrorContextWrapper::new(self.info.scheme(), path.to_string(), w),
+                )
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::ObMultipartWrite)
                     .with_context("service", self.info.scheme())
                     .with_context("path", path)
             })
@@ -232,6 +251,22 @@ impl<A: Access> LayeredAccess for ErrorContextAccessor<A> {
             })
             .map_err(|err| {
                 err.with_operation(Operation::BlockingWrite)
+                    .with_context("service", self.info.scheme())
+                    .with_context("path", path)
+            })
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner
+            .blocking_ob_multipart_write(path, args)
+            .map(|(rp, os)| {
+                (
+                    rp,
+                    ErrorContextWrapper::new(self.info.scheme(), path.to_string(), os),
+                )
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::BlockingObMultipartWrite)
                     .with_context("service", self.info.scheme())
                     .with_context("path", path)
             })
@@ -375,6 +410,23 @@ impl<T: oio::Write> oio::Write for ErrorContextWrapper<T> {
             })
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_offset(offset, bs)
+            .await
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::WriterWithOffset)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
     async fn close(&mut self) -> Result<()> {
         self.inner.close().await.map_err(|err| {
             err.with_operation(Operation::WriterClose)
@@ -411,6 +463,23 @@ impl<T: oio::BlockingWrite> oio::BlockingWrite for ErrorContextWrapper<T> {
             })
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_offset(offset, bs)
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::BlockingWriterWithOffset)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("offset", offset)
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
     fn close(&mut self) -> Result<()> {
         self.inner.close().map_err(|err| {
             err.with_operation(Operation::BlockingWriterClose)
@@ -420,6 +489,101 @@ impl<T: oio::BlockingWrite> oio::BlockingWrite for ErrorContextWrapper<T> {
         })
     }
 }
+
+impl<T: oio::ObMultipartWrite> oio::ObMultipartWrite for ErrorContextWrapper<T> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        self.inner
+            .initiate_part()
+            .await
+            .map_err(|err| {
+                err.with_operation(Operation::ObMultipartWriterInitiatePart)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)   
+            })
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_part_id(bs, part_id)
+            .await
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::ObMultiPartWriterWriteWithPartId)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.inner.close().await.map_err(|err| {
+            err.with_operation(Operation::ObMultipartWriterClose)
+                .with_context("service", self.scheme)
+                .with_context("path", &self.path)
+                .with_context("written", self.processed.to_string())
+        })
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await.map_err(|err| {
+            err.with_operation(Operation::ObMultipartWriterAbort)
+                .with_context("service", self.scheme)
+                .with_context("path", &self.path)
+                .with_context("written", self.processed.to_string())
+        })
+    }
+}
+
+impl<T: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for ErrorContextWrapper<T> {
+    fn initiate_part(&mut self) -> Result<()> {
+        self.inner
+            .initiate_part()
+            .map_err(|err| {
+                err.with_operation(Operation::BlockingObMultipartWriterInitiatePart)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)   
+            })
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let size = bs.len();
+        self.inner
+            .write_with_part_id(bs, part_id)
+            .map(|_| {
+                self.processed += size as u64;
+            })
+            .map_err(|err| {
+                err.with_operation(Operation::BlockingObMultiPartWriterWriteWithPartId)
+                    .with_context("service", self.scheme)
+                    .with_context("path", &self.path)
+                    .with_context("size", size.to_string())
+                    .with_context("written", self.processed.to_string())
+            })
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.inner.close().map_err(|err| {
+            err.with_operation(Operation::BlockingObMultipartWriterClose)
+                .with_context("service", self.scheme)
+                .with_context("path", &self.path)
+                .with_context("written", self.processed.to_string())
+        })
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.inner.abort().map_err(|err| {
+            err.with_operation(Operation::BlockingObMultipartWriterAbort)
+                .with_context("service", self.scheme)
+                .with_context("path", &self.path)
+                .with_context("written", self.processed.to_string())
+        })
+    }
+}
+
 
 impl<T: oio::List> oio::List for ErrorContextWrapper<T> {
     async fn next(&mut self) -> Result<Option<oio::Entry>> {
@@ -479,6 +643,15 @@ impl<T: oio::Delete> oio::Delete for ErrorContextWrapper<T> {
                     .with_context("service", self.scheme)
                     .with_context("deleted", self.processed.to_string())
             })
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args).map_err(|err| {
+            err.with_operation(Operation::DeleterDeleted)
+                .with_context("service", self.scheme)
+                .with_context("path", path)
+                .with_context("deleted", self.processed.to_string())
+        })
     }
 }
 

@@ -60,12 +60,14 @@ tests = [
     "dep:sha2",
     "dep:dotenvy",
     "layers-blocking",
+    "layers-tracing",
     "services-azblob",
     "services-fs",
     "services-http",
     "services-memory",
     "internal-tokio-rt",
     "services-s3",
+    "services-oss",
 ]
 
 # Enable path cache.
@@ -245,6 +247,7 @@ futures = { version = "0.3", default-features = false, features = [
 http = "1.1"
 log = "0.4"
 md-5 = "0.10"
+crc32fast = "1.3"
 # TODO: remove once_cell when lazy_lock is stable: https://doc.rust-lang.org/std/cell/struct.LazyCell.html
 once_cell = "1"
 percent-encoding = "2"

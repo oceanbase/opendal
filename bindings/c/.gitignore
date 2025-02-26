@@ -1,4 +1,5 @@
 build/
+build_release/
 docs/
 
 *.o
@@ -11,3 +12,6 @@ examples/*
 !examples/*.c
 !examples/*.cc
 !examples/*.cpp
+
+deps/**
+compile_commands.json

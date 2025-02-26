@@ -77,6 +77,9 @@ pub struct OssConfig {
     /// - this field if it's `is_some`
     /// - env value: [`ALIBABA_CLOUD_STS_ENDPOINT`]
     pub sts_endpoint: Option<String>,
+    /// Available options:
+    /// - "md5"
+    pub checksum_algorithm: Option<String>,
 }
 
 impl Debug for OssConfig {

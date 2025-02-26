@@ -63,6 +63,13 @@ impl<W: OneShotWrite> oio::Write for OneShotWriter<W> {
         }
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "one shot writer doesn't support write_with_offset",
+        )) 
+    }
+
     async fn close(&mut self) -> Result<()> {
         match self.buffer.clone() {
             Some(bs) => self.inner.write_once(bs).await,

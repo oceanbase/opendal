@@ -85,6 +85,10 @@ impl<D: OneShotDelete> oio::Delete for OneShotDeleter<D> {
         self.delete = None;
         Ok(1)
     }
+
+    fn deleted(&mut self, _: &str, _: OpDelete) -> Result<bool> {
+        Ok(self.delete == None)
+    }
 }
 
 impl<D: BlockingOneShotDelete> oio::BlockingDelete for OneShotDeleter<D> {

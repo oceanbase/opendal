@@ -259,6 +259,8 @@ impl<A: Access, I: LoggingInterceptor> LayeredAccess for LoggingAccessor<A, I> {
     type BlockingReader = LoggingReader<A::BlockingReader, I>;
     type Writer = LoggingWriter<A::Writer, I>;
     type BlockingWriter = LoggingWriter<A::BlockingWriter, I>;
+    type ObMultipartWriter = LoggingWriter<A::ObMultipartWriter, I>;
+    type BlockingObMultipartWriter = LoggingWriter<A::BlockingObMultipartWriter, I>;
     type Lister = LoggingLister<A::Lister, I>;
     type BlockingLister = LoggingLister<A::BlockingLister, I>;
     type Deleter = LoggingDeleter<A::Deleter, I>;
@@ -378,6 +380,41 @@ impl<A: Access, I: LoggingInterceptor> LayeredAccess for LoggingAccessor<A, I> {
                 self.logger.log(
                     &self.info,
                     Operation::Write,
+                    &[("path", path)],
+                    "failed",
+                    Some(&err),
+                );
+                err
+            })
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.logger.log(
+            &self.info,
+            Operation::ObMultipartWrite,
+            &[("path", path)],
+            "started",
+            None,
+        );
+
+        self.inner
+            .ob_multipart_write(path, args)
+            .await
+            .map(|(rp, w)| {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWrite,
+                    &[("path", path)],
+                    "created writer",
+                    None,
+                );
+                let w = LoggingWriter::new(self.info.clone(), self.logger.clone(), path, w);
+                (rp, w)
+            })
+            .map_err(|err| {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWrite,
                     &[("path", path)],
                     "failed",
                     Some(&err),
@@ -670,6 +707,40 @@ impl<A: Access, I: LoggingInterceptor> LayeredAccess for LoggingAccessor<A, I> {
                 self.logger.log(
                     &self.info,
                     Operation::BlockingWrite,
+                    &[("path", path)],
+                    "failed",
+                    Some(&err),
+                );
+                err
+            })
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.logger.log(
+            &self.info,
+            Operation::BlockingObMultipartWrite,
+            &[("path", path)],
+            "started",
+            None,
+        );
+
+        self.inner
+            .blocking_ob_multipart_write(path, args)
+            .map(|(rp, w)| {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWrite,
+                    &[("path", path)],
+                    "created writer",
+                    None,
+                );
+                let w = LoggingWriter::new(self.info.clone(), self.logger.clone(), path, w);
+                (rp, w)
+            })
+            .map_err(|err| {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWrite,
                     &[("path", path)],
                     "failed",
                     Some(&err),
@@ -1018,6 +1089,54 @@ impl<W: oio::Write, I: LoggingInterceptor> oio::Write for LoggingWriter<W, I> {
         }
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+
+        self.logger.log(
+            &self.info,
+            Operation::WriterWithOffset,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write_with_offset(offset, bs).await {
+            Ok(_) => {
+                self.written += size as u64;
+                self.logger.log(
+                    &self.info,
+                    Operation::WriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::WriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
     async fn abort(&mut self) -> Result<()> {
         self.logger.log(
             &self.info,
@@ -1133,6 +1252,56 @@ impl<W: oio::BlockingWrite, I: LoggingInterceptor> oio::BlockingWrite for Loggin
         }
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let size = bs.len();
+
+        self.logger.log(
+            &self.info,
+            Operation::BlockingWriterWithOffset,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+                ("offset", &offset.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write(bs) {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingWriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                        ("offset", &offset.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingWriterWithOffset,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                        ("offset", &offset.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
     fn close(&mut self) -> Result<()> {
         self.logger.log(
             &self.info,
@@ -1158,6 +1327,346 @@ impl<W: oio::BlockingWrite, I: LoggingInterceptor> oio::BlockingWrite for Loggin
                     &self.info,
                     Operation::BlockingWriterClose,
                     &[("path", &self.path), ("written", &self.written.to_string())],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for LoggingWriter<W, I> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::ObMultipartWriterInitiatePart,
+            &[
+                ("path", &self.path)
+            ],
+            "started",
+            None,
+        );
+        match self.inner.initiate_part().await {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterInitiatePart,
+                    &[
+                        ("path", &self.path),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterInitiatePart,
+                    &[
+                        ("path", &self.path),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+    
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let size = bs.len();
+        self.logger.log(
+            &self.info,
+            Operation::ObMultiPartWriterWriteWithPartId,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write_with_part_id(bs, part_id).await {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultiPartWriterWriteWithPartId,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultiPartWriterWriteWithPartId,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::ObMultipartWriterClose,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.close().await {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterClose,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterClose,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::ObMultipartWriterAbort,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.abort().await {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterAbort,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::ObMultipartWriterAbort,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMultipartWrite for LoggingWriter<W, I> {
+    fn initiate_part(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::BlockingObMultipartWriterInitiatePart,
+            &[
+                ("path", &self.path)
+            ],
+            "started",
+            None,
+        );
+        match self.inner.initiate_part() {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterInitiatePart,
+                    &[
+                        ("path", &self.path),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterInitiatePart,
+                    &[
+                        ("path", &self.path),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+    
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let size = bs.len();
+        self.logger.log(
+            &self.info,
+            Operation::BlockingObMultiPartWriterWriteWithPartId,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+                ("size", &size.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.write_with_part_id(bs, part_id) {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultiPartWriterWriteWithPartId,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultiPartWriterWriteWithPartId,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                        ("size", &size.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::BlockingObMultipartWriterClose,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.close() {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterClose,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterClose,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "failed",
+                    Some(&err),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.logger.log(
+            &self.info,
+            Operation::BlockingObMultipartWriterAbort,
+            &[
+                ("path", &self.path),
+                ("written", &self.written.to_string()),
+            ],
+            "started",
+            None,
+        );
+
+        match self.inner.abort() {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterAbort,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::BlockingObMultipartWriterAbort,
+                    &[
+                        ("path", &self.path),
+                        ("written", &self.written.to_string()),
+                    ],
                     "failed",
                     Some(&err),
                 );
@@ -1398,6 +1907,56 @@ impl<D: oio::Delete, I: LoggingInterceptor> oio::Delete for LoggingDeleter<D, I>
                     &self.info,
                     Operation::DeleterFlush,
                     &[
+                        ("queued", &self.queued.to_string()),
+                        ("deleted", &self.deleted.to_string()),
+                    ],
+                    "failed",
+                    Some(err),
+                );
+            }
+        };
+
+        res
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let version = args
+            .version()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "<latest>".to_string());
+
+        self.logger.log(
+            &self.info,
+            Operation::DeleterDeleted,
+            &[("path", path), ("version", &version)],
+            "started",
+            None,
+        );
+
+        let res = self.inner.deleted(path, args);
+
+        match &res {
+            Ok(_) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::DeleterDeleted,
+                    &[
+                        ("path", path),
+                        ("version", &version),
+                        ("queued", &self.queued.to_string()),
+                        ("deleted", &self.deleted.to_string()),
+                    ],
+                    "succeeded",
+                    None,
+                );
+            }
+            Err(err) => {
+                self.logger.log(
+                    &self.info,
+                    Operation::DeleterDeleted,
+                    &[
+                        ("path", path),
+                        ("version", &version),
                         ("queued", &self.queued.to_string()),
                         ("deleted", &self.deleted.to_string()),
                     ],

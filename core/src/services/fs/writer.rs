@@ -63,6 +63,10 @@ impl oio::Write for FsWriter<tokio::fs::File> {
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(ErrorKind::Unsupported, "FsWriter doesn't support write_with_offset"))
+    }
+
     async fn close(&mut self) -> Result<()> {
         let f = self.f.as_mut().expect("FsWriter must be initialized");
         f.flush().await.map_err(new_std_io_error)?;
@@ -100,6 +104,10 @@ impl oio::BlockingWrite for FsWriter<std::fs::File> {
         }
 
         Ok(())
+    }
+
+    fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(ErrorKind::Unsupported, "FsWriter doesn't support write_with_offset"))
     }
 
     fn close(&mut self) -> Result<()> {

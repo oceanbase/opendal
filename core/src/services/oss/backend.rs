@@ -19,6 +19,7 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use bytes::Buf;
 use http::Response;
 use http::StatusCode;
 use http::Uri;
@@ -33,6 +34,7 @@ use super::error::parse_error;
 use super::lister::OssLister;
 use super::writer::OssWriter;
 use super::writer::OssWriters;
+use super::writer::OssMultipartWriter;
 use crate::raw::*;
 use crate::services::OssConfig;
 use crate::*;
@@ -180,7 +182,8 @@ impl OssBuilder {
                             .with_context("service", Scheme::Oss));
                         }
                     },
-                    None => format!("https://{full_host}"),
+                    // default http
+                    None => format!("http://{full_host}"),
                 };
                 (endpoint, full_host)
             }
@@ -299,6 +302,16 @@ impl OssBuilder {
 
         self
     }
+
+    /// Set checksum algorithm of this backend.
+    ///
+    /// Available options:
+    /// - "md5"
+    pub fn checksum_algorithm(mut self, checksum_algorithm: &str) -> Self {
+        self.config.checksum_algorithm = Some(checksum_algorithm.to_string());
+
+        self
+    }
 }
 
 impl Builder for OssBuilder {
@@ -382,6 +395,17 @@ impl Builder for OssBuilder {
             cfg.sts_endpoint = Some(v);
         }
 
+        let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {
+            Some("md5") => Some(ChecksumAlgorithm::Md5),
+            None => None,
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::ConfigInvalid,
+                    "{v} is not a supported checksum_algorithm.",
+                ))
+            }
+        };
+
         let client = if let Some(client) = self.http_client {
             client
         } else {
@@ -414,6 +438,7 @@ impl Builder for OssBuilder {
                 server_side_encryption,
                 server_side_encryption_key_id,
                 delete_max_size,
+                checksum_algorithm,
             }),
         })
     }
@@ -428,10 +453,12 @@ pub struct OssBackend {
 impl Access for OssBackend {
     type Reader = HttpBody;
     type Writer = OssWriters;
+    type ObMultipartWriter = OssMultipartWriter;
     type Lister = oio::PageLister<OssLister>;
     type Deleter = oio::BatchDeleter<OssDeleter>;
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 
@@ -517,6 +544,41 @@ impl Access for OssBackend {
         }
     }
 
+    async fn put_object_tagging(
+        &self,
+        path: &str,
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        let resp = self.core.oss_put_object_tagging(path, args).await?;
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                Ok(RpPutObjTag::default())
+            },
+            _ => Err(parse_error(resp))
+        }
+    }
+
+    async fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        let resp = self.core.oss_get_object_tagging(path).await?;
+        
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                let body = resp.body();
+                let tagging: Tagging = quick_xml::de::from_reader(body.clone().reader()).map_err(new_xml_deserialize_error)?;
+                
+                Ok(tagging.into())
+            }
+            _ => Err(parse_error(resp))
+        }
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         let resp = self.core.oss_get_object(path, &args).await?;
 
@@ -547,6 +609,19 @@ impl Access for OssBackend {
             ))
         };
 
+        Ok((RpWrite::default(), w))
+    }
+
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let concurrent = args.concurrent();
+        let executor = args.executor().cloned();
+        let writer = OssWriter::new(self.core.clone(), path, args);
+
+        let w = oio::MultipartWriter::new(writer, executor, concurrent);
         Ok((RpWrite::default(), w))
     }
 

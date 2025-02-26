@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use bytes::Buf;
 use constants::X_AMZ_META_PREFIX;
 use http::Response;
 use http::StatusCode;
@@ -43,7 +44,7 @@ use reqwest::Url;
 use super::core::*;
 use super::delete::S3Deleter;
 use super::error::parse_error;
-use super::lister::{S3Lister, S3Listers, S3ObjectVersionsLister};
+use super::lister::{S3ListerV1, S3Listers, S3ObjectVersionsLister};
 use super::writer::S3Writer;
 use super::writer::S3Writers;
 use crate::raw::oio::PageLister;
@@ -494,8 +495,8 @@ impl S3Builder {
                 if endpoint.starts_with("http") {
                     endpoint.to_string()
                 } else {
-                    // Prefix https if endpoint doesn't start with scheme.
-                    format!("https://{endpoint}")
+                    // Prefix http if endpoint doesn't start with scheme.
+                    format!("http://{endpoint}")
                 }
             }
             None => "https://s3.amazonaws.com".to_string(),
@@ -551,7 +552,9 @@ impl S3Builder {
     /// This is necessary when writing to AWS S3 Buckets with Object Lock enabled for example.
     ///
     /// Available options:
+    /// - "md5"
     /// - "crc32c"
+    /// - "crc32"
     pub fn checksum_algorithm(mut self, checksum_algorithm: &str) -> Self {
         self.config.checksum_algorithm = Some(checksum_algorithm.to_string());
 
@@ -750,6 +753,8 @@ impl Builder for S3Builder {
 
         let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {
             Some("crc32c") => Some(ChecksumAlgorithm::Crc32c),
+            Some("crc32") => Some(ChecksumAlgorithm::Crc32),
+            Some("md5") => Some(ChecksumAlgorithm::Md5),
             None => None,
             _ => {
                 return Err(Error::new(
@@ -774,12 +779,8 @@ impl Builder for S3Builder {
         }
 
         if cfg.region.is_none() {
-            return Err(Error::new(
-                ErrorKind::ConfigInvalid,
-                "region is missing. Please find it by S3::detect_region() or set them in env.",
-            )
-            .with_operation("Builder::build")
-            .with_context("service", Scheme::S3));
+            // By default, region is set to us-east-1, which is consistent with aws-sdk-cpp.
+            cfg.region = Some(String::from("us-east-1"));
         }
 
         let region = cfg.region.to_owned().unwrap();
@@ -909,10 +910,12 @@ pub struct S3Backend {
 impl Access for S3Backend {
     type Reader = HttpBody;
     type Writer = S3Writers;
+    type ObMultipartWriter = S3Writers;
     type Lister = S3Listers;
     type Deleter = oio::BatchDeleter<S3Deleter>;
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 
@@ -1012,6 +1015,42 @@ impl Access for S3Backend {
         }
     }
 
+    async fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        let resp = self.core.s3_put_object_tagging(path, args).await?;
+
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                Ok(RpPutObjTag::default())
+            }
+            _ => Err(parse_error(resp)),
+        }
+    }
+
+    async fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        let resp = self.core.s3_get_object_tagging(path).await?;
+        
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                let body = resp.body();
+                let tagging: Tagging = quick_xml::de::from_reader(body.clone().reader()).map_err(new_xml_deserialize_error)?;
+                
+                Ok(tagging.into())
+            }
+            _ => Err(parse_error(resp))
+        }
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         let resp = self.core.s3_get_object(path, args.range(), &args).await?;
 
@@ -1038,6 +1077,19 @@ impl Access for S3Backend {
         Ok((RpWrite::default(), w))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let concurrent = args.concurrent();
+        let executor = args.executor().cloned();
+        let writer = S3Writer::new(self.core.clone(), path, args);
+
+        let w = oio::MultipartWriter::new(writer, executor, concurrent);
+        Ok((RpWrite::default(), w))    
+    }
+
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
         Ok((
             RpDelete::default(),
@@ -1055,7 +1107,7 @@ impl Access for S3Backend {
                 args.start_after(),
             )))
         } else {
-            TwoWays::One(PageLister::new(S3Lister::new(
+            TwoWays::One(PageLister::new(S3ListerV1::new(
                 self.core.clone(),
                 path,
                 args.recursive(),
@@ -1109,6 +1161,8 @@ impl Access for S3Backend {
 
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use super::*;
 
     #[test]
@@ -1210,6 +1264,53 @@ mod tests {
         for (name, endpoint, bucket, expected) in cases {
             let region = S3Builder::detect_region(endpoint, bucket).await;
             assert_eq!(region.as_deref(), expected, "{}", name);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_put_object_tagging() {
+        let backend = S3Builder::default()
+            .bucket("xxx")
+            .region("cn-north-1")
+            .endpoint("xxx")
+            .access_key_id("xxx")
+            .secret_access_key("xxx")
+            .build().expect("Failed to build S3 backend");
+
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set);
+        
+        let result = backend.put_object_tagging("tedddddst", op_put_obj_tag).await;
+        assert!(matches!(result, Ok(_)), "Expected Ok but got {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_get_object_tagging() {
+        let backend = S3Builder::default()
+            .bucket("xxx")
+            .region("cn-north-1")
+            .endpoint("xxx")
+            .access_key_id("xxx")
+            .secret_access_key("xxx")
+            .enable_virtual_host_style()
+            .build().expect("Failed to build S3 backend");
+
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set.clone());
+
+        let result = backend.put_object_tagging("test.txt", op_put_obj_tag).await;
+        assert!(matches!(result, Ok(_)), "Expected Ok but got {:?}", result);
+
+        let result = backend.get_object_tagging("test2.txt").await;
+        
+        if let Ok(rp) = result {
+            pretty_assertions::assert_eq!(rp.tag_set(), tag_set);
+        } else if let Err(err) = result {
+            panic!("{}", err);
         }
     }
 }

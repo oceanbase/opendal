@@ -39,7 +39,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, mut body) = resp.into_parts();
     let bs = body.copy_to_bytes(body.remaining());
 
-    let (kind, retryable) = match parts.status {
+    let (mut kind, mut retryable) = match parts.status {
         StatusCode::NOT_FOUND => (ErrorKind::NotFound, false),
         StatusCode::FORBIDDEN => (ErrorKind::PermissionDenied, false),
         StatusCode::PRECONDITION_FAILED | StatusCode::NOT_MODIFIED | StatusCode::CONFLICT => {
@@ -52,10 +52,14 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         _ => (ErrorKind::Unexpected, false),
     };
 
-    let message = match de::from_reader::<_, OssError>(bs.clone().reader()) {
-        Ok(oss_err) => format!("{oss_err:?}"),
-        Err(_) => String::from_utf8_lossy(&bs).into_owned(),
+    let (message, oss_err) = match de::from_reader::<_, OssError>(bs.clone().reader()) {
+        Ok(oss_err) => (format!("{oss_err:?}"), Some(oss_err)),
+        Err(_) => (String::from_utf8_lossy(&bs).into_owned(), None),
     };
+
+    if let Some(oss_err) = oss_err {
+        (kind, retryable) = parse_oss_error_code(oss_err.code.as_str(), oss_err.message.as_str()).unwrap_or((kind, retryable));
+    }
 
     let mut err = Error::new(kind, message);
 
@@ -66,6 +70,21 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     }
 
     err
+}
+
+pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
+    if msg.contains("invalid argument") {
+        return Some((ErrorKind::ConfigInvalid, false))
+    }
+    match code {
+        "NoSuchBucket" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        "BucketNameInvalidError" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        "InvalidDigest" => Some((ErrorKind::ChecksumError, false)),
+        "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)), 
+        "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
+        "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::collections::HashMap;
+
 use super::operator_functions::*;
 use crate::raw::oio::BlockingDelete;
 use crate::raw::*;
@@ -247,6 +249,50 @@ impl BlockingOperator {
             },
         ))
     }
+
+    /// TODO 增加注释
+    pub fn put_object_tagging_with(&self, path: &str) -> FunctionPutObjTag {
+        let path = normalize_path(path);
+
+        FunctionPutObjTag(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            OpPutObjTag::default(),
+            |inner, path, args| {
+                let _rp = inner.blocking_put_object_tagging(&path, args)?;
+                Ok(())
+            },
+        ))
+    }
+
+    /// TODO
+    pub fn put_object_tagging(&self, path: &str, tagging: HashMap<String, String>) -> Result<()> {
+        self.put_object_tagging_with(path).tag_set(tagging).call()
+    }
+
+    /// TODO 添加注释
+    pub fn get_object_tagging_with(&self, path: &str) -> FunctionGetObjTag {
+        let path = normalize_path(path);
+
+        FunctionGetObjTag(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            (),
+            |inner, path, args| {
+                let _ = args;
+                let rp = inner.blocking_get_object_tagging(&path)?;
+                let tag_set = rp.tag_set();
+                Ok(tag_set)
+            }
+        ))
+    }
+
+    /// TODO 
+    pub fn get_object_tagging(&self, path: &str) -> Result<HashMap<String, String>> {
+        self.get_object_tagging_with(path).call()
+    }
+
+    // pub fn get_object_tagging(&self, path: &str) -> 
 
     /// Check if this path exists or not.
     ///
@@ -639,6 +685,7 @@ impl BlockingOperator {
         ))
     }
 
+
     /// Write multiple bytes into given path.
     ///
     /// # Notes
@@ -664,6 +711,11 @@ impl BlockingOperator {
     /// ```
     pub fn writer(&self, path: &str) -> Result<BlockingWriter> {
         self.writer_with(path).call()
+    }
+    
+    ///
+    pub fn ob_multipart_writer(&self, path: &str) -> Result<BlockingObMultipartWriter> {
+        self.ob_multipart_writer_with(path).call()
     }
 
     /// Create a new reader with extra options
@@ -703,6 +755,33 @@ impl BlockingOperator {
 
                 let context = WriteContext::new(inner, path, args, options);
                 let w = BlockingWriter::new(context)?;
+                Ok(w)
+            },
+        ))
+    }
+
+    ///
+    pub fn ob_multipart_writer_with(&self, path: &str) -> FunctionObMultipartWriter {
+        let path = normalize_path(path);
+
+        FunctionObMultipartWriter(OperatorFunction::new(
+            self.inner().clone(),
+            path,
+            (OpWrite::default(), OpWriter::default()),
+            |inner, path, (args, options)| {
+                let path = normalize_path(&path);
+
+                if !validate_path(&path, EntryMode::FILE) {
+                    return Err(
+                        Error::new(ErrorKind::IsADirectory, "write path is a directory")
+                            .with_operation("BlockingOperator::writer_with")
+                            .with_context("service", inner.info().scheme().into_static())
+                            .with_context("path", &path),
+                    );
+                }
+
+                let context = ObMultipartWriteContext::new(inner, path, args, options);
+                let w = BlockingObMultipartWriter::new(context)?;
                 Ok(w)
             },
         ))

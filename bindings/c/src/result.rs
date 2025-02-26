@@ -54,6 +54,24 @@ pub struct opendal_result_read {
     pub error: *mut opendal_error,
 }
 
+///TODO
+#[repr(C)]
+pub struct opendal_result_get_object_tagging {
+    /// TODO
+    pub tagging: *mut opendal_object_tagging,
+    /// TODO
+    pub error: *mut opendal_error,
+}
+
+///TODO
+#[repr(C)]
+pub struct opendal_result_object_tagging_get {
+    /// TODO
+    pub value: opendal_bytes,
+    /// TODO
+    pub error: *mut opendal_error,
+}
+
 /// \brief The result type returned by opendal_operator_is_exist().
 ///
 /// The result type for opendal_operator_is_exist(), the field `is_exist`
@@ -125,6 +143,31 @@ pub struct opendal_result_lister_next {
     pub error: *mut opendal_error,
 }
 
+/// \brief The result type returned by opendal_operator_deleter().
+#[repr(C)]
+pub struct opendal_result_operator_deleter {
+    /// The pointer for opendal_writer
+    pub deleter: *mut opendal_deleter,
+    /// The error, if ok, it is null
+    pub error: *mut opendal_error,
+}
+
+///
+#[repr(C)]
+pub struct opendal_result_deleter_flush {
+    pub deleted: usize,
+    pub error: *mut opendal_error,
+}
+
+///
+#[repr(C)]
+pub struct opendal_result_deleter_deleted {
+    ///
+    pub deleted: bool,
+    ///
+    pub error: *mut opendal_error,
+}
+
 /// \brief The result type returned by opendal_operator_reader().
 /// The result type for opendal_operator_reader(), the field `reader` contains the reader
 /// of the path, which is an iterator of the objects under the path. the field `code` represents
@@ -157,6 +200,17 @@ pub struct opendal_result_operator_writer {
     pub writer: *mut opendal_writer,
     /// The error, if ok, it is null
     pub error: *mut opendal_error,
+}
+
+/// \brief The result type returned by opendal_operator_multipart_writer().
+/// The result type for opendal_operator_multipart_writer(), the field `multipart_writer` contains the writer
+/// of the path, which is an iterator of the objects under the path. 
+#[repr(C)]
+pub struct opendal_result_operator_multipart_writer {
+    /// The pointer for opendal_multipart_writer
+    pub multipart_writer: *mut opendal_multipart_writer,
+    /// The error, if ok, it is null
+    pub error: *mut opendal_error
 }
 
 /// \brief The result type returned by opendal_writer_write().

@@ -79,6 +79,27 @@ typedef enum opendal_code {
    * The range of the content is not satisfied.
    */
   OPENDAL_RANGE_NOT_SATISFIED,
+  /**
+   * The region name or The bucket name is invalid
+   */
+  OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
+  /**
+   * This error is retured when the uploaded checksum does not match the checksum
+   * calculated from the data accepted by the server.
+   */
+  OPENDAL_CHECKSUM_ERROR,
+  /**
+   * OpenDal returns this error to indicate that the region is not correct.
+   */
+  OPENDAL_REGION_MISMATCH,
+  /**
+   * The operation is timed out.
+   */
+  OPENDAL_TIMED_OUT,
+  /**
+   * checksum type is not supported
+   */
+  OPENDAL_CHECKSUM_UNSUPPORTED,
 } opendal_code;
 
 /**
@@ -127,6 +148,7 @@ typedef struct opendal_bytes {
 typedef struct opendal_error {
   enum opendal_code code;
   struct opendal_bytes message;
+  bool is_temporary;
 } opendal_error;
 
 /**
@@ -179,6 +201,42 @@ typedef struct opendal_lister {
    */
   void *inner;
 } opendal_lister;
+
+/**
+ * \brief The result type returned by opendal's deleter operation.
+ *
+ * \note The opendal_deleter actually owns a pointer to
+ * a opendal::BlockingDeleter, which is inside the Rust core code.
+ */
+typedef struct opendal_deleter {
+  /**
+   * The pointer to the opendal::BlockingDeleter in the Rust code.
+   * Only touch this on judging whether it is NULL.
+   */
+  void *inner;
+} opendal_deleter;
+
+/**
+ *
+ */
+typedef struct opendal_result_deleter_deleted {
+  /**
+   *
+   */
+  bool deleted;
+  /**
+   *
+   */
+  struct opendal_error *error;
+} opendal_result_deleter_deleted;
+
+/**
+ *
+ */
+typedef struct opendal_result_deleter_flush {
+  uintptr_t deleted;
+  struct opendal_error *error;
+} opendal_result_deleter_flush;
 
 /**
  * \brief Carries all metadata associated with a **path**.
@@ -288,7 +346,7 @@ typedef struct opendal_result_read {
  */
 typedef struct opendal_reader {
   /**
-   * The pointer to the opendal::StdReader in the Rust code.
+   * The pointer to the opendal::BlockingReader in the Rust code.
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
@@ -339,6 +397,56 @@ typedef struct opendal_result_operator_writer {
    */
   struct opendal_error *error;
 } opendal_result_operator_writer;
+
+/**
+ * \brief The result type returned by opendal's ob_multipart_writer operation.
+ * \note The opendal_multipart_writer actually owns a pointer to
+ * an opendal::BlockingObMultipartWriter, which is inside the Rust core code.
+ */
+typedef struct opendal_multipart_writer {
+  /**
+   * The pointer to the opendal::BlockingObMultipartWriter in the Rust code.
+   * Only touch this on judging whether it is NULL.
+   */
+  void *inner;
+} opendal_multipart_writer;
+
+/**
+ * \brief The result type returned by opendal_operator_multipart_writer().
+ * The result type for opendal_operator_multipart_writer(), the field `multipart_writer` contains the writer
+ * of the path, which is an iterator of the objects under the path.
+ */
+typedef struct opendal_result_operator_multipart_writer {
+  /**
+   * The pointer for opendal_multipart_writer
+   */
+  struct opendal_multipart_writer *multipart_writer;
+  /**
+   * The error, if ok, it is null
+   */
+  struct opendal_error *error;
+} opendal_result_operator_multipart_writer;
+
+/**
+ * TODO
+ */
+typedef struct opendal_object_tagging {
+  void *inner;
+} opendal_object_tagging;
+
+/**
+ *TODO
+ */
+typedef struct opendal_result_get_object_tagging {
+  /**
+   * TODO
+   */
+  struct opendal_object_tagging *tagging;
+  /**
+   * TODO
+   */
+  struct opendal_error *error;
+} opendal_result_get_object_tagging;
 
 /**
  * \brief The result type returned by opendal_operator_is_exist().
@@ -417,6 +525,20 @@ typedef struct opendal_result_list {
    */
   struct opendal_error *error;
 } opendal_result_list;
+
+/**
+ * \brief The result type returned by opendal_operator_deleter().
+ */
+typedef struct opendal_result_operator_deleter {
+  /**
+   * The pointer for opendal_writer
+   */
+  struct opendal_deleter *deleter;
+  /**
+   * The error, if ok, it is null
+   */
+  struct opendal_error *error;
+} opendal_result_operator_deleter;
 
 /**
  * \brief Metadata for **operator**, users can use this metadata to get information
@@ -582,6 +704,24 @@ typedef struct opendal_capability {
 } opendal_capability;
 
 /**
+ *TODO
+ */
+typedef struct opendal_result_object_tagging_get {
+  /**
+   * TODO
+   */
+  struct opendal_bytes value;
+  /**
+   * TODO
+   */
+  struct opendal_error *error;
+} opendal_result_object_tagging_get;
+
+typedef struct ObSpan {
+  void *span;
+} ObSpan;
+
+/**
  * \brief The is the result type returned by opendal_reader_read().
  * The result type contains a size field, which is the size of the data read,
  * which is zero on error. The error field is the error code and error message.
@@ -637,6 +777,27 @@ struct opendal_result_lister_next opendal_lister_next(struct opendal_lister *sel
  * \brief Free the heap-allocated metadata used by opendal_lister
  */
 void opendal_lister_free(struct opendal_lister *ptr);
+
+/**
+ * \brief append a path into the deleter
+ */
+struct opendal_error *opendal_deleter_delete(struct opendal_deleter *self, const char *path);
+
+/**
+ * \brief check the path is deleted
+ */
+struct opendal_result_deleter_deleted opendal_deleter_deleted(struct opendal_deleter *self,
+                                                              const char *path);
+
+/**
+ * \brief delete all the paths in the deleter.
+ */
+struct opendal_result_deleter_flush opendal_deleter_flush(struct opendal_deleter *self);
+
+/**
+ * \brief Free the heap-allocated metadata used by opendal_lister
+ */
+void opendal_deleter_free(struct opendal_deleter *ptr);
 
 /**
  * \brief Free the heap-allocated metadata used by opendal_metadata
@@ -707,6 +868,13 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  * ```
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
+
+struct opendal_error *opendal_init_env(void *alloc,
+                                       void *free,
+                                       void *loghandler,
+                                       uintptr_t thread_cnt,
+                                       uintptr_t pool_max_idle_per_host,
+                                       uint64_t pool_max_idle_time_s);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
@@ -946,6 +1114,37 @@ struct opendal_result_operator_writer opendal_operator_writer(const struct opend
                                                               const char *path);
 
 /**
+ *
+ */
+struct opendal_result_operator_writer opendal_operator_append_writer(const struct opendal_operator *op,
+                                                                     const char *path);
+
+/**
+ * \brief Blocking create a ob_multipart_writer for the specified path.
+ *
+ * ob_multipart_writer is designed to enable writing with a part ID. Although Opendal's
+ * MultipartWriter automatically performs uploads based on buffer conditions, to maintain
+ * compatibilty with ob's existing code logic, it is necessary to expose a method for
+ * uplaoding with a specified part_id.
+ *
+ * This function prepares a ob_multipart_writer that can be used to write data to the
+ * specified path using the provided operator. If successful, it returns a valid
+ * ob_multipart_writer; otherwise, it returns an error.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The designated path where the writer will be used
+ * @see opendal_operator
+ * @see opendal_result_operator_multipart_writer.
+ * @see opendal_error
+ * @return Returns opendal_result_operator_multipart_writer, containing a multipart_writer
+ * and an opendal_error.
+ * If the operation succeeds, the `multipart_writer` field holds a valid writer and the `error` field
+ * is null. Otherwise, the `multipart_writer` will be null and the `error` will be set correspondingly.
+ */
+struct opendal_result_operator_multipart_writer opendal_operator_multipart_writer(const struct opendal_operator *op,
+                                                                                  const char *path);
+
+/**
  * \brief Blocking delete the object in `path`.
  *
  * Delete the object in `path` blocking by `op_ptr`.
@@ -988,6 +1187,23 @@ struct opendal_result_operator_writer opendal_operator_writer(const struct opend
  * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_delete(const struct opendal_operator *op, const char *path);
+
+/**
+ * \brief Blocking put tagging to object in `path`
+ *
+ * Put tagging to object in `path` blocking by `op_ptr`
+ * Error is NULL if successful, otherwise it contains the error code and error message.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The designated path you want to put tagging to
+ * @param tagging The tagging you want to put
+ */
+struct opendal_error *opendal_operator_put_object_tagging(const struct opendal_operator *op,
+                                                          const char *path,
+                                                          const struct opendal_object_tagging *tagging);
+
+struct opendal_result_get_object_tagging opendal_operator_get_object_tagging(const struct opendal_operator *op,
+                                                                             const char *path);
 
 /**
  * \brief Check whether the path exists.
@@ -1166,7 +1382,15 @@ struct opendal_result_stat opendal_operator_stat(const struct opendal_operator *
  * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_list opendal_operator_list(const struct opendal_operator *op,
-                                                 const char *path);
+                                                 const char *path,
+                                                 uintptr_t limit,
+                                                 bool recursive,
+                                                 const char *start_after);
+
+/**
+ * TODO
+ */
+struct opendal_result_operator_deleter opendal_operator_deleter(const struct opendal_operator *op);
 
 /**
  * \brief Blocking create the directory in `path`.
@@ -1300,6 +1524,8 @@ struct opendal_error *opendal_operator_copy(const struct opendal_operator *op,
                                             const char *src,
                                             const char *dest);
 
+struct opendal_error *opendal_panic_test(void);
+
 /**
  * \brief Get information of underlying accessor.
  *
@@ -1363,6 +1589,29 @@ struct opendal_capability opendal_operator_info_get_native_capability(const stru
 void opendal_bytes_free(struct opendal_bytes *ptr);
 
 /**
+ *TODO
+ */
+struct opendal_object_tagging *opendal_object_tagging_new(void);
+
+/**
+ *TODO
+ */
+void opendal_object_tagging_set(struct opendal_object_tagging *self,
+                                const char *key,
+                                const char *value);
+
+/**
+ *TODO
+ */
+struct opendal_result_object_tagging_get opendal_object_tagging_get(const struct opendal_object_tagging *self,
+                                                                    const char *key);
+
+/**
+ *TODO
+ */
+void opendal_object_tagging_free(struct opendal_object_tagging *ptr);
+
+/**
  * \brief Construct a heap-allocated opendal_operator_options
  *
  * @return An empty opendal_operator_option, which could be set by
@@ -1400,6 +1649,10 @@ void opendal_operator_options_set(struct opendal_operator_options *self,
  */
 void opendal_operator_options_free(struct opendal_operator_options *ptr);
 
+struct ObSpan *ob_new_span(uint64_t tenant_id, const char *trace_id);
+
+void ob_drop_span(struct ObSpan *span);
+
 /**
  * \brief Path of entry.
  *
@@ -1421,6 +1674,11 @@ char *opendal_entry_path(const struct opendal_entry *self);
 char *opendal_entry_name(const struct opendal_entry *self);
 
 /**
+ * TODO optimize mem allocation
+ */
+struct opendal_metadata *opendal_entry_metadata(const struct opendal_entry *self);
+
+/**
  * \brief Frees the heap memory used by the opendal_list_entry
  */
 void opendal_entry_free(struct opendal_entry *ptr);
@@ -1430,7 +1688,8 @@ void opendal_entry_free(struct opendal_entry *ptr);
  */
 struct opendal_result_reader_read opendal_reader_read(struct opendal_reader *self,
                                                       uint8_t *buf,
-                                                      uintptr_t len);
+                                                      uintptr_t len,
+                                                      uintptr_t offset);
 
 /**
  * \brief Frees the heap memory used by the opendal_reader.
@@ -1444,10 +1703,55 @@ struct opendal_result_writer_write opendal_writer_write(struct opendal_writer *s
                                                         const struct opendal_bytes *bytes);
 
 /**
+ * \brief Write data to the writer with the offset.
+ */
+struct opendal_result_writer_write opendal_writer_write_with_offset(struct opendal_writer *self,
+                                                                    uint64_t offset,
+                                                                    const struct opendal_bytes *bytes);
+
+/**
+ * \brief Abort the pending writer.
+ */
+struct opendal_error *opendal_writer_abort(struct opendal_writer *self);
+
+/**
+ * \brief close the writer.
+ */
+struct opendal_error *opendal_writer_close(struct opendal_writer *self);
+
+/**
  * \brief Frees the heap memory used by the opendal_writer.
  * \note This function make sure all data have been stored.
  */
 void opendal_writer_free(struct opendal_writer *ptr);
+
+/**
+ * \brief Initiate the multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_initiate(struct opendal_multipart_writer *self);
+
+/**
+ * \brief Write data with part id to the multipart writer.
+ */
+struct opendal_result_writer_write opendal_multipart_writer_write(struct opendal_multipart_writer *self,
+                                                                  const struct opendal_bytes *bytes,
+                                                                  uintptr_t part_id);
+
+/**
+ * \brief Abort the pending multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_abort(struct opendal_multipart_writer *self);
+
+/**
+ * \brief close the multipart writer.
+ */
+struct opendal_error *opendal_multipart_writer_close(struct opendal_multipart_writer *self);
+
+/**
+ * \brief Frees the heap memory used by the opendal_multipart_writer.
+ * \note This function make sure all data have been stored.
+ */
+void opendal_multipart_writer_free(struct opendal_multipart_writer *ptr);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -123,4 +123,9 @@ impl<D: BatchDelete> oio::Delete for BatchDeleter<D> {
         // to retry or push more delete operations.
         Ok(deleted)
     }
+
+    /// check the path is deleted
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        Ok(!self.buffer.contains(&(path.to_string(), args)))
+    }
 }

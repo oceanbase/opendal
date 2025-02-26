@@ -54,10 +54,12 @@ where
 impl<S: Adapter> Access for Backend<S> {
     type Reader = Buffer;
     type Writer = KvWriter<S>;
+    type ObMultipartWriter = ();
     type Lister = HierarchyLister<KvLister>;
     type Deleter = oio::OneShotDeleter<KvDeleter<S>>;
     type BlockingReader = Buffer;
     type BlockingWriter = KvWriter<S>;
+    type BlockingObMultipartWriter = ();
     type BlockingLister = HierarchyLister<KvLister>;
     type BlockingDeleter = oio::OneShotDeleter<KvDeleter<S>>;
 
@@ -291,6 +293,13 @@ impl<S: Adapter> oio::Write for KvWriter<S> {
         Ok(())
     }
 
+    async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "Kvwriter doesn't support write_with_offset",
+        ))
+    }
+
     async fn close(&mut self) -> Result<()> {
         let value = match &self.value {
             Some(value) => value.clone(),
@@ -316,6 +325,10 @@ impl<S: Adapter> oio::BlockingWrite for KvWriter<S> {
         buf.push(bs);
         self.buf = Some(buf);
         Ok(())
+    }
+
+    fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
+        Err(Error::new(ErrorKind::Unsupported, "KvWriter doesn't support write_with_offset"))
     }
 
     fn close(&mut self) -> Result<()> {

@@ -270,6 +270,12 @@ impl WriteGenerator<oio::BlockingWriter> {
         Ok(n)
     }
 
+    /// Write with offset
+    pub fn write_with_offset(&mut self, offset: u64,  bs: Buffer) -> Result<()> {
+        self.w.write_with_offset(offset, bs)?;
+        Ok(())
+    } 
+
     /// Finish the write process.
     pub fn close(&mut self) -> Result<()> {
         loop {
@@ -283,7 +289,48 @@ impl WriteGenerator<oio::BlockingWriter> {
 
         self.w.close()
     }
+
+    /// Abort the write process.
+     pub fn abort(&mut self) -> Result<()> {
+        self.buffer.clear();
+        self.w.abort()
+    }
 }
+
+
+// impl WriteGenerator<oio::ObMultipartWriter> {
+//     pub async fn create(ctx: Arc<WriteContext>) -> Result<Self> {
+//         let (chunk_size, exact) = ctx.calculate_chunk_size();
+//         let (_, w) = ctx.acc.write(ctx.path(), ctx.args().clone()).await?;
+
+//         Ok(Self {
+//             w,
+//             chunk_size,
+//             exact,
+//             buffer: oio::QueueBuf::new(),
+//         })
+//     }
+
+//     /// Finish the write process.
+//     pub async fn close(&mut self) -> Result<()> {
+//         loop {
+//             if self.buffer.is_empty() {
+//                 break;
+//             }
+
+//             let buf = self.buffer.take().collect();
+//             self.w.write_dyn(buf).await?;
+//         }
+
+//         self.w.close().await
+//     }
+
+//     /// Abort the write process.
+//     pub async fn abort(&mut self) -> Result<()> {
+//         self.buffer.clear();
+//         self.w.abort().await
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -312,6 +359,10 @@ mod tests {
 
             let mut buf = self.buf.lock().await;
             buf.put(bs);
+            Ok(())
+        }
+
+        async fn write_with_offset(&mut self, _: u64, _: Buffer) -> Result<()> {
             Ok(())
         }
 

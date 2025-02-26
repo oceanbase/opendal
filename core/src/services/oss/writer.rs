@@ -25,6 +25,7 @@ use crate::raw::*;
 use crate::*;
 
 pub type OssWriters = TwoWays<oio::MultipartWriter<OssWriter>, oio::AppendWriter<OssWriter>>;
+pub type OssMultipartWriter = oio::MultipartWriter<OssWriter>;
 
 pub struct OssWriter {
     core: Arc<OssCore>,
@@ -128,13 +129,15 @@ impl oio::MultipartWrite for OssWriter {
     }
 
     async fn complete_part(&self, upload_id: &str, parts: &[oio::MultipartPart]) -> Result<()> {
-        let parts = parts
+        let mut parts: Vec<_> = parts
             .iter()
             .map(|p| MultipartUploadPart {
                 part_number: p.part_number,
                 etag: p.etag.clone(),
             })
             .collect();
+
+        parts.sort_by(|lth, rth| lth.part_number.cmp(&rth.part_number));
 
         let resp = self
             .core
