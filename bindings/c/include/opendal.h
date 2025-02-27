@@ -148,12 +148,12 @@ typedef struct opendal_error {
 } opendal_error;
 
 /**
- * \brief opendal_list_entry is the entry under a path, which is listed from the opendal_lister
+ * \brief opendal_entry is the entry under a path, which is listed from the opendal_lister
  *
  * For examples, please see the comment section of opendal_operator_list()
  * @see opendal_operator_list()
- * @see opendal_list_entry_path()
- * @see opendal_list_entry_name()
+ * @see opendal_entry_path()
+ * @see opendal_entry_name()
  */
 typedef struct opendal_entry {
   /**
@@ -424,22 +424,26 @@ typedef struct opendal_result_operator_multipart_writer {
 } opendal_result_operator_multipart_writer;
 
 /**
- * TODO
+ * \brief opendal_object_tagging is a C-compatible substitute for HashMap<String, String> in Rust
  */
 typedef struct opendal_object_tagging {
   void *inner;
 } opendal_object_tagging;
 
 /**
- *TODO
+ * \brief The result type returned by opendal_operator_get_object_tagging().
+ *
+ * The result type for opendal_operator_get_object_tagging(), the field `tagging`
+ * contains the object tagging, and the field `error` contains the
+ * corresponding error. If successful, the `error` field is null.
  */
 typedef struct opendal_result_get_object_tagging {
   /**
-   * TODO
+   * The pointer for object tagging, if ok, it is not null
    */
   struct opendal_object_tagging *tagging;
   /**
-   * TODO
+   * The error, if ok, it is null
    */
   struct opendal_error *error;
 } opendal_result_get_object_tagging;
@@ -700,11 +704,11 @@ typedef struct opendal_capability {
 } opendal_capability;
 
 /**
- *TODO
+ * \brief The result type returned by opendal_object_tagging_get().
  */
 typedef struct opendal_result_object_tagging_get {
   /**
-   * TODO
+   * The byte array indicated
    */
   struct opendal_bytes value;
   /**
@@ -865,6 +869,22 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
 
+/**
+ * \brief init opendal environment
+ *
+ * Task to initialize the environment include:
+ * - init global allocator and releaser
+ * - init global runtime
+ * - init global http client
+ * - init global log handler
+ *
+ * @param alloc: the function to allocate memory
+ * @param free: the function to release memory
+ * @param loghandler: the function to handle log message
+ * @param thread_cnt: the thread count of global runtime
+ * @param pool_max_idle_per_host: the max idle connection per host
+ * @param pool_max_idle_time_s: the max idle time for a connection
+ */
 struct opendal_error *opendal_init_env(void *alloc,
                                        void *free,
                                        void *loghandler,
@@ -975,9 +995,6 @@ struct opendal_result_operator_new opendal_operator_new(const char *scheme,
  * * The `bytes` provided has valid byte in the `data` field and the `len` field is set
  *   correctly.
  *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_write(const struct opendal_operator *op,
                                              const char *path,
@@ -1019,10 +1036,6 @@ struct opendal_error *opendal_operator_write(const struct opendal_operator *op,
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_read opendal_operator_read(const struct opendal_operator *op,
                                                  const char *path);
@@ -1060,10 +1073,6 @@ struct opendal_result_read opendal_operator_read(const struct opendal_operator *
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_operator_reader opendal_operator_reader(const struct opendal_operator *op,
                                                               const char *path);
@@ -1101,16 +1110,31 @@ struct opendal_result_operator_reader opendal_operator_reader(const struct opend
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_operator_writer opendal_operator_writer(const struct opendal_operator *op,
                                                               const char *path);
 
 /**
+ * \brief Blocking create a append_writer for the specified path.
  *
+ * This function prepares a append writer that can be used to append data to the specified path
+ * using the provided operator. If successful, it returns a valid writer with append option; otherwise, it
+ * returns an error.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The designated path where the writer will be used
+ * @see opendal_operator
+ * @see opendal_result_operator_writer
+ * @see opendal_error
+ * @return Returns opendal_result_operator_writer, containing a writer and an opendal_error.
+ * If the operation succeeds, the `writer` field holds a valid writer and the `error` field
+ * is null. Otherwise, the `writer` will be null and the `error` will be set correspondingly.
+ *
+ * # Safety
+ *
+ * It is **safe** under the cases below
+ * * The memory pointed to by `path` must contain a valid nul terminator at the end of
+ *   the string.
  */
 struct opendal_result_operator_writer opendal_operator_append_writer(const struct opendal_operator *op,
                                                                      const char *path);
@@ -1177,10 +1201,6 @@ struct opendal_result_operator_multipart_writer opendal_operator_multipart_write
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_delete(const struct opendal_operator *op, const char *path);
 
@@ -1198,6 +1218,15 @@ struct opendal_error *opendal_operator_put_object_tagging(const struct opendal_o
                                                           const char *path,
                                                           const struct opendal_object_tagging *tagging);
 
+/**
+ * \brief Blocking get tagging of object in `path`
+ *
+ * Get tagging of object in `path` blocking by `op_ptr`
+ * If successful, it returns a valid tagging; otherwise, it returns an error.
+ *
+ * @param op The opendal_operator created previously
+ * @param path The path of the object that you want to retrieve tagging
+ */
 struct opendal_result_get_object_tagging opendal_operator_get_object_tagging(const struct opendal_operator *op,
                                                                              const char *path);
 
@@ -1235,10 +1264,6 @@ struct opendal_result_get_object_tagging opendal_operator_get_object_tagging(con
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 __attribute__((deprecated("Use opendal_operator_exists() instead.")))
 struct opendal_result_is_exist opendal_operator_is_exist(const struct opendal_operator *op,
@@ -1278,10 +1303,6 @@ struct opendal_result_is_exist opendal_operator_is_exist(const struct opendal_op
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_exists opendal_operator_exists(const struct opendal_operator *op,
                                                      const char *path);
@@ -1319,10 +1340,6 @@ struct opendal_result_exists opendal_operator_exists(const struct opendal_operat
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_stat opendal_operator_stat(const struct opendal_operator *op,
                                                  const char *path);
@@ -1372,10 +1389,6 @@ struct opendal_result_stat opendal_operator_stat(const struct opendal_operator *
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_result_list opendal_operator_list(const struct opendal_operator *op,
                                                  const char *path,
@@ -1384,7 +1397,9 @@ struct opendal_result_list opendal_operator_list(const struct opendal_operator *
                                                  const char *start_after);
 
 /**
- * TODO
+ * \brief Create a deleter by opendal_operator
+ *
+ * You can use the deleter to delete objects in batch.
  */
 struct opendal_result_operator_deleter opendal_operator_deleter(const struct opendal_operator *op);
 
@@ -1418,10 +1433,6 @@ struct opendal_result_operator_deleter opendal_operator_deleter(const struct ope
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `path` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_create_dir(const struct opendal_operator *op,
                                                   const char *path);
@@ -1464,10 +1475,6 @@ struct opendal_error *opendal_operator_create_dir(const struct opendal_operator 
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `src` or `dest` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_rename(const struct opendal_operator *op,
                                               const char *src,
@@ -1511,15 +1518,14 @@ struct opendal_error *opendal_operator_rename(const struct opendal_operator *op,
  * It is **safe** under the cases below
  * * The memory pointed to by `path` must contain a valid nul terminator at the end of
  *   the string.
- *
- * # Panic
- *
- * * If the `src` or `dest` points to NULL, this function panics, i.e. exits with information
  */
 struct opendal_error *opendal_operator_copy(const struct opendal_operator *op,
                                             const char *src,
                                             const char *dest);
 
+/**
+ * \brief panic test function.
+ */
 struct opendal_error *opendal_panic_test(void);
 
 /**
@@ -1585,25 +1591,28 @@ struct opendal_capability opendal_operator_info_get_native_capability(const stru
 void opendal_bytes_free(struct opendal_bytes *ptr);
 
 /**
- *TODO
+ * \brief Constructs a new opendal_operator_options
  */
 struct opendal_object_tagging *opendal_object_tagging_new(void);
 
 /**
- *TODO
+ * \brief Set the value of the key in the opendal_object_tagging
+ * @param key The key to be set
+ * @param value The value to be set
  */
 void opendal_object_tagging_set(struct opendal_object_tagging *self,
                                 const char *key,
                                 const char *value);
 
 /**
- *TODO
+ * \brief Get the value of the key in the opendal_object_tagging
+ * @param key The key to be get
  */
 struct opendal_result_object_tagging_get opendal_object_tagging_get(const struct opendal_object_tagging *self,
                                                                     const char *key);
 
 /**
- *TODO
+ * \brief Frees the heap memory used by the opendal_object_tagging
  */
 void opendal_object_tagging_free(struct opendal_object_tagging *ptr);
 
@@ -1670,7 +1679,9 @@ char *opendal_entry_path(const struct opendal_entry *self);
 char *opendal_entry_name(const struct opendal_entry *self);
 
 /**
- * TODO optimize mem allocation
+ * \brief Metadata of entry.
+ *
+ * \note To free the metadata, you can directly call opendal_metadata_free()
  */
 struct opendal_metadata *opendal_entry_metadata(const struct opendal_entry *self);
 

@@ -54,19 +54,23 @@ pub struct opendal_result_read {
     pub error: *mut opendal_error,
 }
 
-///TODO
+/// \brief The result type returned by opendal_operator_get_object_tagging().
+///
+/// The result type for opendal_operator_get_object_tagging(), the field `tagging`
+/// contains the object tagging, and the field `error` contains the
+/// corresponding error. If successful, the `error` field is null.
 #[repr(C)]
 pub struct opendal_result_get_object_tagging {
-    /// TODO
+    /// The pointer for object tagging, if ok, it is not null
     pub tagging: *mut opendal_object_tagging,
-    /// TODO
+    /// The error, if ok, it is null
     pub error: *mut opendal_error,
 }
 
-///TODO
+/// \brief The result type returned by opendal_object_tagging_get().
 #[repr(C)]
 pub struct opendal_result_object_tagging_get {
-    /// TODO
+    /// The byte array indicated  
     pub value: opendal_bytes,
     /// TODO
     pub error: *mut opendal_error,
