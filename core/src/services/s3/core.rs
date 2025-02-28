@@ -271,7 +271,7 @@ impl S3Core {
             Some(ChecksumAlgorithm::Crc32) => {
                 let mut hasher = Hasher::new();
                 body.clone().for_each(|b| hasher.update(&b));
-                let digest = hasher.finalize() + 1;
+                let digest = hasher.finalize();
                 Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
             },
             Some(ChecksumAlgorithm::Md5) => {

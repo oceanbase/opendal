@@ -36,7 +36,7 @@ cd $OLDPWD/bindings/c
 rm -rf build
 mkdir build
 cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=%{_tmpdir}
+cmake .. -DCMAKE_INSTALL_PREFIX=%{_tmpdir} -DCMAKE_BUILD_TYPE=release
 make
 make install
 

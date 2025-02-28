@@ -1217,8 +1217,8 @@ pub unsafe extern "C" fn opendal_operator_stat(
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
-            return opendal_result_stat {
-                meta: std::ptr::null_mut(),
+                return opendal_result_stat {
+                    meta: std::ptr::null_mut(),
                     error: e,
                 };
             }
