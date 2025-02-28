@@ -149,6 +149,20 @@ where
 #[global_allocator]
 static GLOBAL: CustomAllocator = CustomAllocator;
 
+/// \brief init opendal environment
+/// 
+/// Task to initialize the environment include:
+/// - init global allocator and releaser
+/// - init global runtime
+/// - init global http client
+/// - init global log handler
+/// 
+/// @param alloc: the function to allocate memory
+/// @param free: the function to release memory
+/// @param loghandler: the function to handle log message
+/// @param thread_cnt: the thread count of global runtime
+/// @param pool_max_idle_per_host: the max idle connection per host
+/// @param pool_max_idle_time_s: the max idle time for a connection
 #[no_mangle]
 pub extern "C" fn opendal_init_env(
     alloc: *mut c_void,
@@ -159,33 +173,15 @@ pub extern "C" fn opendal_init_env(
     pool_max_idle_time_s: u64,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
-        let alloc_fn: Option<AllocFn> = if !alloc.is_null() {
-            Some(unsafe { std::mem::transmute(alloc) })
-        } else {
-            None
-        };
-
-        let free_fn: Option<FreeFn> = if !free.is_null() {
-            Some(unsafe { std::mem::transmute(free) })
-        } else {
-            None
-        };
-
-        let loghandler_fn: Option<LogHandler> = if !loghandler.is_null() {
-            Some(unsafe { std::mem::transmute(loghandler) })
-        } else {
-            None
-        };
-
-        if alloc_fn.is_none() || free_fn.is_none() {
+        if alloc.is_null() || free.is_null() {
             let err = core::Error::new(core::ErrorKind::ConfigInvalid, "invalid mem func");
             return opendal_error::new(err);
-        }
-
-        unsafe {
-            ALLOC_FN = alloc_fn;
-            FREE_FN = free_fn;
-            OB_LOG_HANDLER = loghandler_fn;
+        } else {
+            unsafe {
+                ALLOC_FN = Some(std::mem::transmute(alloc));
+                FREE_FN = Some(std::mem::transmute(free));
+                OB_LOG_HANDLER = if loghandler.is_null() { None } else { Some(std::mem::transmute(loghandler)) };
+            }
         }
 
         let mut global_runtime = RUNTIME.write().expect("failed to lock global RUNTIME");
@@ -221,7 +217,7 @@ pub extern "C" fn opendal_init_env(
             }
         }
 
-        if loghandler_fn.is_none() {
+        if loghandler.is_null() {
             let timer = OffsetTime::local_rfc_3339();
             if let Err(e) = timer {
                 return opendal_error::new(core::Error::new(
@@ -265,7 +261,7 @@ pub extern "C" fn opendal_init_env(
     }
 }
 
-/// TODO
+/// \Prief Convert the c_char to str
 pub fn c_char_to_str<'a>(path: *const c_char) -> Result<&'a str, *mut opendal_error> {
     if path.is_null() {
         return Err(opendal_error::new(core::Error::new(
@@ -348,6 +344,7 @@ fn build_operator(
         .unwrap_or(60);
 
     // TODO 简化代码，由于个别 service 没有 http_client 方法，无法直接基于 `Operator::via_iter` 函数修改
+    // 若需要简化，可新建一个包含 http_clietn 的 trait，并为 oss 和 s3 impl，然后用一个智能指针去接实现了该 trait 的 builder
     let mut op = match schema {
         core::Scheme::S3 => {
             let mut builder: core::services::S3 =
@@ -537,9 +534,6 @@ pub unsafe extern "C" fn opendal_operator_new(
 /// * The `bytes` provided has valid byte in the `data` field and the `len` field is set
 ///   correctly.
 ///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_write(
     op: &opendal_operator,
@@ -600,10 +594,6 @@ pub unsafe extern "C" fn opendal_operator_write(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_read(
     op: &opendal_operator,
@@ -672,10 +662,6 @@ pub unsafe extern "C" fn opendal_operator_read(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_reader(
     op: &opendal_operator,
@@ -744,10 +730,6 @@ pub unsafe extern "C" fn opendal_operator_reader(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_writer(
     op: &opendal_operator,
@@ -788,7 +770,26 @@ pub unsafe extern "C" fn opendal_operator_writer(
     }
 }
 
+/// \brief Blocking create a append_writer for the specified path.
 ///
+/// This function prepares a append writer that can be used to append data to the specified path
+/// using the provided operator. If successful, it returns a valid writer with append option; otherwise, it
+/// returns an error.
+///
+/// @param op The opendal_operator created previously
+/// @param path The designated path where the writer will be used
+/// @see opendal_operator
+/// @see opendal_result_operator_writer
+/// @see opendal_error
+/// @return Returns opendal_result_operator_writer, containing a writer and an opendal_error.
+/// If the operation succeeds, the `writer` field holds a valid writer and the `error` field
+/// is null. Otherwise, the `writer` will be null and the `error` will be set correspondingly.
+///
+/// # Safety
+///
+/// It is **safe** under the cases below
+/// * The memory pointed to by `path` must contain a valid nul terminator at the end of
+///   the string.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_append_writer(
     op: &opendal_operator,
@@ -926,10 +927,6 @@ pub unsafe extern "C" fn opendal_operator_multipart_writer(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_delete(
     op: &opendal_operator,
@@ -995,7 +992,13 @@ pub unsafe extern "C" fn opendal_operator_put_object_tagging(
     }
 }
 
-//TODO
+/// \brief Blocking get tagging of object in `path`
+///
+/// Get tagging of object in `path` blocking by `op_ptr`
+/// If successful, it returns a valid tagging; otherwise, it returns an error.
+///
+/// @param op The opendal_operator created previously
+/// @param path The path of the object that you want to retrieve tagging 
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_get_object_tagging(
     op: &opendal_operator,
@@ -1069,10 +1072,6 @@ pub unsafe extern "C" fn opendal_operator_get_object_tagging(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 #[deprecated(note = "Use opendal_operator_exists() instead.")]
 pub unsafe extern "C" fn opendal_operator_is_exist(
@@ -1142,10 +1141,6 @@ pub unsafe extern "C" fn opendal_operator_is_exist(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_exists(
     op: &opendal_operator,
@@ -1213,10 +1208,6 @@ pub unsafe extern "C" fn opendal_operator_exists(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_stat(
     op: &opendal_operator,
@@ -1226,8 +1217,8 @@ pub unsafe extern "C" fn opendal_operator_stat(
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
-                return opendal_result_stat {
-                    meta: std::ptr::null_mut(),
+            return opendal_result_stat {
+                meta: std::ptr::null_mut(),
                     error: e,
                 };
             }
@@ -1296,10 +1287,6 @@ pub unsafe extern "C" fn opendal_operator_stat(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_list(
     op: &opendal_operator,
@@ -1371,7 +1358,10 @@ pub unsafe extern "C" fn opendal_operator_list(
     }
 }
 
-/// TODO
+
+/// \brief Create a deleter by opendal_operator
+/// 
+/// You can use the deleter to delete objects in batch.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_deleter(
     op: &opendal_operator,
@@ -1425,10 +1415,6 @@ pub unsafe extern "C" fn opendal_operator_deleter(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `path` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_create_dir(
     op: &opendal_operator,
@@ -1491,10 +1477,6 @@ pub unsafe extern "C" fn opendal_operator_create_dir(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `src` or `dest` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_rename(
     op: &opendal_operator,
@@ -1564,10 +1546,6 @@ pub unsafe extern "C" fn opendal_operator_rename(
 /// It is **safe** under the cases below
 /// * The memory pointed to by `path` must contain a valid nul terminator at the end of
 ///   the string.
-///
-/// # Panic
-///
-/// * If the `src` or `dest` points to NULL, this function panics, i.e. exits with information
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_copy(
     op: &opendal_operator,
@@ -1601,6 +1579,7 @@ pub unsafe extern "C" fn opendal_operator_copy(
     }
 }
 
+/// \brief panic test function. 
 #[no_mangle]
 pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
     let result = std::panic::catch_unwind(|| {
@@ -1637,7 +1616,7 @@ pub fn handle_result<T>(
     }
 }
 
-///
+/// \brief dump panic error
 pub fn dump_panic(err: Box<dyn std::any::Any + Send>) {
     if let Some(msg) = err.downcast_ref::<&str>() {
         tracing::error!("Caught a panic: {}", msg);

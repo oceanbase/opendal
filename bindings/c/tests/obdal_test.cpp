@@ -401,6 +401,11 @@ TEST_F(ObDalTest, test_batch_delete)
   ASSERT_TRUE(result.error == nullptr);
   ASSERT_EQ(result.deleted, 4);
 
+  result = opendal_deleter_flush(deleter);
+  dump_error(result.error);
+  ASSERT_EQ(result.error, nullptr);
+  ASSERT_EQ(result.deleted, 0);
+
   opendal_result_deleter_deleted result_deleted = opendal_deleter_deleted(deleter, (path + "a").c_str());
   dump_error(result_deleted.error);
   ASSERT_EQ(nullptr, result_deleted.error);
@@ -712,7 +717,19 @@ TEST_F(ObDalTest, test_catch_panic)
   ASSERT_TRUE(error);
   dump_error(error);
   free_error(error);
+
+  // TODO: op、writer 等相关函数空指针防御
+  // opendal_result_stat result = opendal_operator_stat(nullptr, "test");
+  // ASSERT_TRUE(result.error);
+  // dump_error(result.error);
+  // free_error(result.error);
+
+  // opendal_result_writer_write result2 = opendal_writer_write(nullptr, nullptr);
+  // ASSERT_TRUE(result2.error);
+  // dump_error(result2.error);
+  // free_error(result2.error);
 }
+
 int main(int argc, char **argv) 
 {
   ::testing::InitGoogleTest(&argc, argv);

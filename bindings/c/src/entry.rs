@@ -25,12 +25,12 @@ use ::opendal as core;
 use crate::{opendal_error, opendal_metadata};
 use super::*;
 
-/// \brief opendal_list_entry is the entry under a path, which is listed from the opendal_lister
+/// \brief opendal_entry is the entry under a path, which is listed from the opendal_lister
 ///
 /// For examples, please see the comment section of opendal_operator_list()
 /// @see opendal_operator_list()
-/// @see opendal_list_entry_path()
-/// @see opendal_list_entry_name()
+/// @see opendal_entry_path()
+/// @see opendal_entry_name()
 #[repr(C)]
 pub struct opendal_entry {
     /// The pointer to the opendal::Entry in the Rust code.
@@ -111,7 +111,9 @@ impl opendal_entry {
         }
     }
 
-    /// TODO optimize mem allocation
+    /// \brief Metadata of entry.
+    ///
+    /// \note To free the metadata, you can directly call opendal_metadata_free()
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_metadata(&self) -> *mut opendal_metadata {
         let ret = catch_unwind(|| {

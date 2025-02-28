@@ -95,7 +95,7 @@ impl From<&opendal_bytes> for Buffer {
     }
 }
 
-/// TODO
+/// \brief opendal_object_tagging is a C-compatible substitute for HashMap<String, String> in Rust
 #[repr(C)]
 pub struct opendal_object_tagging {
     inner: *mut c_void,
@@ -119,7 +119,7 @@ impl opendal_object_tagging {
         Box::into_raw(Box::new(tagging))
     }
 
-    ///TODO
+    /// \brief Constructs a new opendal_operator_options
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_new() -> *mut Self {
         let ret = catch_unwind(|| {
@@ -134,7 +134,9 @@ impl opendal_object_tagging {
         }
     }
 
-    ///TODO
+    /// \brief Set the value of the key in the opendal_object_tagging
+    /// @param key The key to be set
+    /// @param value The value to be set
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_set(
         &mut self,
@@ -155,7 +157,8 @@ impl opendal_object_tagging {
         handle_result_without_ret(ret);
     }
 
-    ///TODO
+    /// \brief Get the value of the key in the opendal_object_tagging
+    /// @param key The key to be get
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_get(
         &self,
@@ -192,14 +195,16 @@ impl opendal_object_tagging {
             }
         }        
     }
-    ///TODO
+
+    /// \brief Construct a new opendal_operator_options from a HashMap<String, String>
     pub fn from_hashmap(hashmap: HashMap<String, String>) -> *mut Self {
         let tagging = opendal_object_tagging {
             inner: Box::into_raw(Box::new(hashmap)) as _,
         };
         Box::into_raw(Box::new(tagging))
     }
-    ///TODO
+
+    /// \brief Frees the heap memory used by the opendal_object_tagging
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_free(ptr: *mut opendal_object_tagging) {
         let ret = catch_unwind(|| {
