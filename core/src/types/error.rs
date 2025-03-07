@@ -97,6 +97,8 @@ pub enum ErrorKind {
     TimedOut,
     /// checksum type is not supported
     ChecksumUnsupported,
+    /// oss append write offset not equal to length
+    PwriteOffsetNotMatch,
 }
 
 impl ErrorKind {
@@ -132,6 +134,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::RegionMismatch => "RegionMismatch",
             ErrorKind::TimedOut => "TimedOut",
             ErrorKind::ChecksumUnsupported => "ChecksumUnsupported",
+            ErrorKind::PwriteOffsetNotMatch => "PwriteOffsetNotMatch",
         }
     }
 }

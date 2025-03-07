@@ -689,6 +689,19 @@ TEST_F(ObDalTest, test_append_writer)
     ASSERT_EQ(result.size, data.len);
   }
 
+  {
+    // test oss append offset not equal to length
+    opendal_bytes data = {
+      .data = (uint8_t *) data_str,
+      .len = (uintptr_t) 1,
+    };
+    opendal_result_writer_write result = opendal_writer_write_with_offset(writer, 0, &data);
+    dump_error(result.error);
+    ASSERT_TRUE(result.error != nullptr);
+    ASSERT_EQ(result.error->code, OPENDAL_PWRITE_OFFSET_NOT_MATCH);
+    free_error(result.error);
+  }
+
   opendal_error *error = opendal_writer_close(writer);
   dump_error(error);
   ASSERT_EQ(nullptr, error);

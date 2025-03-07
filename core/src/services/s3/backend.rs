@@ -691,7 +691,6 @@ impl Builder for S3Builder {
         debug!("backend build started: {:?}", &self);
 
         let root = normalize_root(&self.config.root.clone().unwrap_or_default());
-        debug!("backend use root {}", &root);
 
         // Handle bucket name.
         let bucket = if self.is_bucket_valid() {
@@ -702,7 +701,6 @@ impl Builder for S3Builder {
                     .with_context("service", Scheme::S3),
             )
         }?;
-        debug!("backend use bucket {}", &bucket);
 
         let default_storage_class = match &self.config.default_storage_class {
             None => None,
@@ -784,14 +782,12 @@ impl Builder for S3Builder {
         }
 
         let region = cfg.region.to_owned().unwrap();
-        debug!("backend use region: {region}");
 
         // Retain the user's endpoint if it exists; otherwise, try loading it from the environment.
         self.config.endpoint = self.config.endpoint.or_else(|| cfg.endpoint_url.clone());
 
         // Building endpoint.
         let endpoint = self.build_endpoint(&region);
-        debug!("backend use endpoint: {endpoint}");
 
         // Setting all value from user input if available.
         if let Some(v) = self.config.access_key_id {

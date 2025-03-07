@@ -91,6 +91,7 @@ protected:
     opendal_error *error = opendal_init_env(reinterpret_cast<void *>(my_alloc), 
                                             reinterpret_cast<void *>(my_free),
                                             reinterpret_cast<void *>(ob_log_handler),
+                                            6,  // LevelFilter::TRACE,
                                             32, // thread count 
                                             97, // max client count
                                             60); // max idle time of client (unit s)

@@ -83,6 +83,7 @@ pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> 
         "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)), 
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
+        "PositionNotEqualToLength" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
         _ => None,
     }
 }

@@ -49,7 +49,7 @@ extern "C" void ob_log_handler(const char *level, const char *message)
 void *my_alloc(size_t size, size_t align) 
 {
     void *ptr = malloc(size);
-    // printf("my_alloc %zu %zu %p\n", size, align, ptr);
+    // printf("my_alloc %zu %p\n", size, ptr);
     return ptr;
 }
 

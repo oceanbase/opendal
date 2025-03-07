@@ -60,6 +60,8 @@ pub enum opendal_code {
     OPENDAL_TIMED_OUT,
     /// checksum type is not supported
     OPENDAL_CHECKSUM_UNSUPPORTED,
+    /// oss append write offset not equal to length
+    OPENDAL_PWRITE_OFFSET_NOT_MATCH,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -82,6 +84,7 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::RegionMismatch => opendal_code::OPENDAL_REGION_MISMATCH,
             core::ErrorKind::TimedOut => opendal_code::OPENDAL_TIMED_OUT,
             core::ErrorKind::ChecksumUnsupported => opendal_code::OPENDAL_CHECKSUM_UNSUPPORTED,
+            core::ErrorKind::PwriteOffsetNotMatch => opendal_code::OPENDAL_PWRITE_OFFSET_NOT_MATCH,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
