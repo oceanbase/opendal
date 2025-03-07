@@ -100,6 +100,10 @@ typedef enum opendal_code {
    * checksum type is not supported
    */
   OPENDAL_CHECKSUM_UNSUPPORTED,
+  /**
+   * oss append write offset not equal to length
+   */
+  OPENDAL_PWRITE_OFFSET_NOT_MATCH,
 } opendal_code;
 
 /**
@@ -892,6 +896,7 @@ int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
 struct opendal_error *opendal_init_env(void *alloc,
                                        void *free,
                                        void *loghandler,
+                                       uint32_t log_level,
                                        uintptr_t thread_cnt,
                                        uintptr_t pool_max_idle_per_host,
                                        uint64_t pool_max_idle_time_s);
