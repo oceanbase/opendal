@@ -936,10 +936,10 @@ impl<T: Access + ?Sized> Access for Arc<T> {
     }
 
     fn ob_multipart_write(
-            &self,
-            path: &str,
-            args: OpWrite,
-        ) -> impl Future<Output = Result<(RpWrite, Self::ObMultipartWriter)>> + MaybeSend {
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> impl Future<Output = Result<(RpWrite, Self::ObMultipartWriter)>> + MaybeSend {
         async move { self.as_ref().ob_multipart_write(path, args).await }
     }
 

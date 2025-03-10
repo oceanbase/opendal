@@ -18,8 +18,7 @@
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
 use std::panic::catch_unwind;
-use operator::dump_panic;
-use tracing::warn;
+use tracing::{error, warn};
 
 use ::opendal as core;
 use crate::{opendal_error, opendal_metadata};
@@ -74,9 +73,7 @@ impl opendal_entry {
         match handle_result(ret) {
             Ok(ret) => ret,
             Err(err) => {
-                // TODO
-                // Box::from_raw(err)
-                // error!();
+                error!("opendal_entry_path error: {}", *err);
                 opendal_error::opendal_error_free(err);
                 std::ptr::null_mut()
             }

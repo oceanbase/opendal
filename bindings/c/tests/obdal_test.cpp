@@ -173,7 +173,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     char *entry_path = opendal_entry_path(entry); 
     ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     // check file length
     opendal_metadata *meta = opendal_entry_metadata(entry);
     ASSERT_TRUE(meta != nullptr);
@@ -189,7 +189,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "c/b").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -221,7 +221,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     char *entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "c/").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -232,7 +232,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "a").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -242,7 +242,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -272,7 +272,7 @@ TEST_F(ObDalTest, test_list)
     char *entry_path = opendal_entry_path(entry);
     std::cout << "entry_path:" << entry_path << std::endl;
     ASSERT_TRUE(0 == strcmp((path + "a").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -283,7 +283,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -294,7 +294,7 @@ TEST_F(ObDalTest, test_list)
     entry = r_lister_next.entry;
     entry_path = opendal_entry_path(entry);
     ASSERT_TRUE(0 == strcmp((path + "c/").c_str(), entry_path));
-    my_free(entry_path);
+    opendal_c_char_free(entry_path);
     opendal_entry_free(entry);
     entry = nullptr;
 
@@ -490,7 +490,7 @@ TEST_F(ObDalTest, test_list_directories)
     // std::cout << "#[entry name]: " << opendal_entry_name(entry) << std::endl;
     char *entry_name_buf = opendal_entry_name(entry);
     std::string entry_name(entry_name_buf);
-    my_free(entry_name_buf);
+    opendal_c_char_free(entry_name_buf);
     ASSERT_TRUE(entry_name.size() > 0);
     if (entry_name.back() == '/') {
       directories.push_back(entry_name);
@@ -654,6 +654,35 @@ TEST_F(ObDalTest, test_ob_multipart)
   free(read_buf);
   opendal_multipart_writer_free(writer);
   free(data_str);
+
+  {
+    opendal_result_operator_multipart_writer result = opendal_operator_multipart_writer(op_, path.c_str());
+    ASSERT_FALSE(result.error);
+    opendal_multipart_writer *writer = result.multipart_writer;
+    ASSERT_TRUE(writer);
+    opendal_error *error = opendal_multipart_writer_initiate(writer);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+
+    error = opendal_multipart_writer_abort(writer);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+    opendal_multipart_writer_free(writer);
+  }
+
+  // This case checks to see if there are any Futures left after the multipart_writer 
+  // has been released without writing, with the help of tokio-console
+  {
+    opendal_result_operator_multipart_writer result = opendal_operator_multipart_writer(op_, path.c_str());
+    ASSERT_FALSE(result.error);
+    opendal_multipart_writer *writer = result.multipart_writer;
+    ASSERT_TRUE(writer);
+    opendal_error *error = opendal_multipart_writer_initiate(writer);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+
+    opendal_multipart_writer_free(writer);
+  }
 }
 
 TEST_F(ObDalTest, test_append_writer)
@@ -741,6 +770,8 @@ TEST_F(ObDalTest, test_catch_panic)
   // ASSERT_TRUE(result2.error);
   // dump_error(result2.error);
   // free_error(result2.error);
+
+  opendal_c_char_free(nullptr);
 }
 
 int main(int argc, char **argv) 

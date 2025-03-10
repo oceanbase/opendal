@@ -64,6 +64,7 @@ message(NOTICE "-- OpenDAL C static lib: ${OPENDAL_STATIC_LIB}")
 message(NOTICE "-- OpenDAL C shared lib: ${OPENDAL_SHARED_LIB}")
 
 # custom target for cargo build
+# RUSTFLAGS=\"--cfg tokio_unstable\" 
 add_custom_target(cargo_build
     COMMAND sh -c "cargo build ${CARGO_BUILD_TYPE}"
     BYPRODUCTS  ${OPENDAL_STATIC_LIB} ${OPENDAL_SHARED_LIB}
@@ -108,6 +109,7 @@ if (USE_GTEST)
     add_executable(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
     target_link_libraries(obdal_test PRIVATE opendal_c_shared gtest gmock -lpthread)
     target_link_libraries(obdal_test PRIVATE ${stdcxx_shared})
+    target_link_options(obdal_test PRIVATE -rdynamic)
     message(STATUS "Linking with: ${stdcxx_shared}")
 
     if (TEST_ENABLE_ASAN)

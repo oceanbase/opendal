@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ffi::CString;
@@ -23,22 +24,22 @@ use std::os::raw::c_char;
 use std::panic::catch_unwind;
 use std::str::FromStr;
 use std::sync::OnceLock;
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::time::Duration;
 use tracing::field::Field;
 use tracing::level_filters::LevelFilter;
 use tracing::{span, Event, Subscriber};
-use tracing_subscriber;
+use tracing_subscriber::{self};
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::error;
 
 use ::opendal as core;
-use core::Configurator;
-use core::Builder;
 use core::layers::TimeoutLayer;
 use core::raw::HttpClient;
+use core::Builder;
+use core::Configurator;
 use core::ErrorKind;
 
 use super::*;
@@ -97,10 +98,8 @@ where
             (None, Some(line)) => {
                 let _ = write!(&mut message, "line={}", line);
             }
-            (None, None) => {
-            }
+            (None, None) => {}
         };
-
 
         event.record(&mut |field: &Field, value: &dyn std::fmt::Debug| {
             let _ = write!(&mut message, ", {}: {:?}", field.name(), value);
@@ -151,13 +150,13 @@ where
 static GLOBAL: CustomAllocator = CustomAllocator;
 
 /// \brief init opendal environment
-/// 
+///
 /// Task to initialize the environment include:
 /// - init global allocator and releaser
 /// - init global runtime
 /// - init global http client
 /// - init global log handler
-/// 
+///
 /// @param alloc: the function to allocate memory
 /// @param free: the function to release memory
 /// @param loghandler: the function to handle log message
@@ -182,7 +181,11 @@ pub extern "C" fn opendal_init_env(
             unsafe {
                 ALLOC_FN = Some(std::mem::transmute(alloc));
                 FREE_FN = Some(std::mem::transmute(free));
-                OB_LOG_HANDLER = if loghandler.is_null() { None } else { Some(std::mem::transmute(loghandler)) };
+                OB_LOG_HANDLER = if loghandler.is_null() {
+                    None
+                } else {
+                    Some(std::mem::transmute(loghandler))
+                };
             }
         }
 
@@ -195,12 +198,15 @@ pub extern "C" fn opendal_init_env(
                 .expect("failed to build tokio runtime")
         });
 
+        // console_subscriber::init();
+
         let _ = HTTP_CLIENT.get_or_init(|| {
             HttpClient::with(
                 reqwest::Client::builder()
                     .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
                     .pool_max_idle_per_host(pool_max_idle_per_host)
-                    .build().expect("failed to build reqwest client"),
+                    .build()
+                    .expect("failed to build reqwest client"),
             )
         });
 
@@ -350,7 +356,7 @@ fn build_operator(
     let mut op = match schema {
         core::Scheme::S3 => {
             let mut builder: core::services::S3 =
-            core::services::S3Config::from_iter(map)?.into_builder();
+                core::services::S3Config::from_iter(map)?.into_builder();
             let http_client = HTTP_CLIENT.get();
             if let Some(client) = http_client {
                 builder = builder.http_client(client.clone());
@@ -360,7 +366,7 @@ fn build_operator(
         }
         core::Scheme::Oss => {
             let mut builder: core::services::Oss =
-            core::services::OssConfig::from_iter(map)?.into_builder();
+                core::services::OssConfig::from_iter(map)?.into_builder();
             let http_client = HTTP_CLIENT.get();
             if let Some(client) = http_client {
                 builder = builder.http_client(client.clone());
@@ -385,8 +391,8 @@ fn build_operator(
     );
     if !op.info().full_capability().blocking {
         if let Some(runtime) = RUNTIME.get() {
-            let handle =
-                tokio::runtime::Handle::try_current().unwrap_or_else(|_| (*runtime).handle().clone());
+            let handle = tokio::runtime::Handle::try_current()
+                .unwrap_or_else(|_| (*runtime).handle().clone());
             let _guard = handle.enter();
             let blocking_layer = core::layers::BlockingLayer::create()?;
             op = op.layer(blocking_layer);
@@ -996,7 +1002,7 @@ pub unsafe extern "C" fn opendal_operator_put_object_tagging(
 /// If successful, it returns a valid tagging; otherwise, it returns an error.
 ///
 /// @param op The opendal_operator created previously
-/// @param path The path of the object that you want to retrieve tagging 
+/// @param path The path of the object that you want to retrieve tagging
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_get_object_tagging(
     op: &opendal_operator,
@@ -1356,9 +1362,8 @@ pub unsafe extern "C" fn opendal_operator_list(
     }
 }
 
-
 /// \brief Create a deleter by opendal_operator
-/// 
+///
 /// You can use the deleter to delete objects in batch.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_operator_deleter(
@@ -1577,7 +1582,24 @@ pub unsafe extern "C" fn opendal_operator_copy(
     }
 }
 
-/// \brief panic test function. 
+/// free the c char
+#[no_mangle]
+pub unsafe extern "C" fn opendal_c_char_free(ptr: *mut c_char) {
+    let ret = catch_unwind(|| {
+        if !ptr.is_null() {
+            let _ = CString::from_raw(ptr);
+        }
+    });
+    match handle_result(ret) {
+        Ok(r) => r,
+        Err(err) => {
+            error!("opendal_c_char_free error: {}", *err);
+            opendal_error::opendal_error_free(err);
+        }
+    }
+}
+
+/// \brief panic test function.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
     let result = std::panic::catch_unwind(|| {

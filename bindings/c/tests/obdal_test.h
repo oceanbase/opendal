@@ -94,12 +94,13 @@ protected:
                                             6,  // LevelFilter::TRACE,
                                             32, // thread count 
                                             97, // max client count
-                                            60); // max idle time of client (unit s)
+                                            30); // max idle time of client (unit s)
     ASSERT_EQ(error, nullptr);
   }
 
   static void TearDownTestCase()
   {
+    sleep(30);
   }
 protected:
   std::string base_path_;
