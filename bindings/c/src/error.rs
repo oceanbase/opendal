@@ -15,15 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::fmt::Display;
 use ::opendal as core;
 use opendal::Buffer;
 use crate::{handle_result_without_ret, types::opendal_bytes};
 use std::panic::catch_unwind;
-
 /// \brief The error code for all opendal APIs in C binding.
 /// \todo The error handling is not complete, the error with error message will be
 /// added in the future.
 #[repr(C)]
+#[derive(Debug)]
 pub enum opendal_code {
     /// returning it back. For example, s3 returns an internal service error.
     OPENDAL_UNEXPECTED,
@@ -140,5 +141,11 @@ impl opendal_error {
             }
         });
         handle_result_without_ret(ret);
+    }
+}
+
+impl Display for opendal_error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "code: {:?}, message: {:?}, is_temporary: {}", self.code, Buffer::from(&self.message), self.is_temporary)
     }
 }

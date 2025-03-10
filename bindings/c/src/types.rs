@@ -299,7 +299,7 @@ impl opendal_operator_options {
         &mut self,
         key: *const c_char,
         value: *const c_char,
-    ) {
+    ) -> *mut opendal_error {
         let ret = catch_unwind(AssertUnwindSafe(|| {
             let k = unsafe { std::ffi::CStr::from_ptr(key) }
                 .to_str()
@@ -311,7 +311,10 @@ impl opendal_operator_options {
                 .to_string();
             self.deref_mut().insert(k, v);
         }));
-        handle_result_without_ret(ret);
+        match handle_result(ret) {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => e,
+        }
     }
 
     /// \brief Free the allocated memory used by [`opendal_operator_options`]

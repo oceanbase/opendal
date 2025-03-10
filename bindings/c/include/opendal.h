@@ -1533,6 +1533,11 @@ struct opendal_error *opendal_operator_copy(const struct opendal_operator *op,
                                             const char *dest);
 
 /**
+ * free the c char
+ */
+void opendal_c_char_free(char *ptr);
+
+/**
  * \brief panic test function.
  */
 struct opendal_error *opendal_panic_test(void);
@@ -1654,9 +1659,9 @@ struct opendal_operator_options *opendal_operator_options_new(void);
  * opendal_operator_options_free(options);
  * ```
  */
-void opendal_operator_options_set(struct opendal_operator_options *self,
-                                  const char *key,
-                                  const char *value);
+struct opendal_error *opendal_operator_options_set(struct opendal_operator_options *self,
+                                                   const char *key,
+                                                   const char *value);
 
 /**
  * \brief Free the allocated memory used by [`opendal_operator_options`]
