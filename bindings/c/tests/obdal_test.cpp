@@ -19,6 +19,22 @@
 
 #include "obdal_test.h" 
 
+TEST_F(ObDalTest, test_multi_init)
+{
+  opendal_fin_env();
+
+  opendal_error *error = opendal_init_env(
+      reinterpret_cast<void *>(my_alloc), 
+      reinterpret_cast<void *>(my_free),
+      reinterpret_cast<void *>(ob_log_handler),
+      6,  // LevelFilter::TRACE,
+      32, // thread count 
+      97, // max client count
+      30); // max idle time of client (unit s) 
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+}
+
 TEST_F(ObDalTest, test_rw)
 {
   std::string path = base_path_ + "test_rw";
@@ -773,6 +789,8 @@ TEST_F(ObDalTest, test_catch_panic)
 
   opendal_c_char_free(nullptr);
 }
+
+
 
 int main(int argc, char **argv) 
 {
