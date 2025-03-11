@@ -23,7 +23,7 @@ use std::fmt::Write;
 use std::os::raw::c_char;
 use std::panic::catch_unwind;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::RwLock;
 use std::time::Duration;
 use tracing::field::Field;
 use tracing::level_filters::LevelFilter;
@@ -44,8 +44,8 @@ use core::ErrorKind;
 
 use super::*;
 
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-static HTTP_CLIENT: OnceLock<HttpClient> = OnceLock::new();
+static RUNTIME: RwLock<Option<tokio::runtime::Runtime>> = RwLock::new(None);
+static HTTP_CLIENT: RwLock<Option<HttpClient>> = RwLock::new(None);
 
 pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
@@ -189,26 +189,38 @@ pub extern "C" fn opendal_init_env(
             }
         }
 
-        let _ = RUNTIME.get_or_init(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(thread_cnt as usize)
-                .thread_name("obdal")
-                .enable_all()
-                .build()
-                .expect("failed to build tokio runtime")
-        });
+        let mut global_runtime = RUNTIME.write().expect("failed to lock global RUNTIME");
+        match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(thread_cnt as usize)
+            .thread_name("obdal")
+            .enable_all()
+            .build() {
+            Ok(runtime) => *global_runtime = Some(runtime),
+            Err(e) => {
+                return opendal_error::new(
+                    core::Error::new(
+                        core::ErrorKind::Unexpected, format!("failed to build tokio runtime: {}", e.to_string())
+                    )
+                )
+            }
+        }
 
-        // console_subscriber::init();
-
-        let _ = HTTP_CLIENT.get_or_init(|| {
-            HttpClient::with(
-                reqwest::Client::builder()
-                    .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
-                    .pool_max_idle_per_host(pool_max_idle_per_host)
-                    .build()
-                    .expect("failed to build reqwest client"),
-            )
-        });
+        let client = reqwest::Client::builder()
+                .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
+                .pool_max_idle_per_host(pool_max_idle_per_host)
+                .build();
+        match client {
+            Ok(client) => {
+                let mut http_client = HTTP_CLIENT.write().expect("failed to lock global HTTP_CLIENT");
+                *http_client = Some(HttpClient::with(client));
+            }
+            Err(e) => {
+                return opendal_error::new(core::Error::new(
+                    core::ErrorKind::Unexpected,
+                    format!("failed to build reqwest client: {}", e.to_string()),
+                ));
+            }
+        }
 
         let log_level = match log_level {
             // OB_LOG_LEVEL_INFO
@@ -223,7 +235,7 @@ pub extern "C" fn opendal_init_env(
             6 => LevelFilter::TRACE,
             _ => LevelFilter::INFO,
         };
-        
+
         if loghandler.is_null() {
             let timer = OffsetTime::local_rfc_3339();
             if let Err(e) = timer {
@@ -266,6 +278,29 @@ pub extern "C" fn opendal_init_env(
     match handle_result(ret) {
         Ok(ret) => ret,
         Err(error) => error,
+    }
+}
+
+/// \brief fin opendal environment
+///
+/// Task to finalize the environment include:
+/// - drop global allocator and releaser
+/// - drop global runtime
+/// - drop global http client
+#[no_mangle]
+pub extern "C" fn opendal_fin_env() {
+    let mut http_client = HTTP_CLIENT.write().expect("failed to lock global HTTP_CLIENT");
+    *http_client = None;
+    let mut global_runtime = RUNTIME.write().expect("failed to lock global RUNTIME");
+    if let Some(runtime) = global_runtime.take() {
+        drop(runtime);
+    } 
+    *global_runtime = None;
+
+    unsafe  {
+        OB_LOG_HANDLER = None;
+        ALLOC_FN = None;
+        FREE_FN = None;
     }
 }
 
@@ -357,8 +392,10 @@ fn build_operator(
         core::Scheme::S3 => {
             let mut builder: core::services::S3 =
                 core::services::S3Config::from_iter(map)?.into_builder();
-            let http_client = HTTP_CLIENT.get();
-            if let Some(client) = http_client {
+            let http_client = HTTP_CLIENT.read().map_err(|_| {
+                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+            })?;
+            if let Some(client) = http_client.as_ref() {
                 builder = builder.http_client(client.clone());
             }
             let acc = builder.build()?;
@@ -367,8 +404,10 @@ fn build_operator(
         core::Scheme::Oss => {
             let mut builder: core::services::Oss =
                 core::services::OssConfig::from_iter(map)?.into_builder();
-            let http_client = HTTP_CLIENT.get();
-            if let Some(client) = http_client {
+            let http_client = HTTP_CLIENT.read().map_err(|_| {
+                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+            })?;
+            if let Some(client) = http_client.as_ref() {
                 builder = builder.http_client(client.clone());
             }
             let acc = builder.build()?;
@@ -390,7 +429,7 @@ fn build_operator(
             .with_io_timeout(Duration::from_secs(timeout)),
     );
     if !op.info().full_capability().blocking {
-        if let Some(runtime) = RUNTIME.get() {
+        if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
             let handle = tokio::runtime::Handle::try_current()
                 .unwrap_or_else(|_| (*runtime).handle().clone());
             let _guard = handle.enter();

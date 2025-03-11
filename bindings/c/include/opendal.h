@@ -902,6 +902,16 @@ struct opendal_error *opendal_init_env(void *alloc,
                                        uint64_t pool_max_idle_time_s);
 
 /**
+ * \brief fin opendal environment
+ *
+ * Task to finalize the environment include:
+ * - drop global allocator and releaser
+ * - drop global runtime
+ * - drop global http client
+ */
+void opendal_fin_env(void);
+
+/**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
  *
  * Please only use this for a pointer pointing at a valid opendal_operator.

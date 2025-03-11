@@ -100,7 +100,7 @@ protected:
 
   static void TearDownTestCase()
   {
-    sleep(30);
+    opendal_fin_env();
   }
 protected:
   std::string base_path_;
