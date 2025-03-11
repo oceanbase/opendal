@@ -24,6 +24,7 @@ use std::os::raw::c_char;
 use std::panic::catch_unwind;
 use std::str::FromStr;
 use std::sync::RwLock;
+use std::sync::Once;
 use std::time::Duration;
 use tracing::field::Field;
 use tracing::level_filters::LevelFilter;
@@ -46,6 +47,7 @@ use super::*;
 
 static RUNTIME: RwLock<Option<tokio::runtime::Runtime>> = RwLock::new(None);
 static HTTP_CLIENT: RwLock<Option<HttpClient>> = RwLock::new(None);
+static TRACING_INIT_ONCE: Once = Once::new();
 
 pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
@@ -236,44 +238,48 @@ pub extern "C" fn opendal_init_env(
             _ => LevelFilter::INFO,
         };
 
-        if loghandler.is_null() {
-            let timer = OffsetTime::local_rfc_3339();
-            if let Err(e) = timer {
-                return opendal_error::new(core::Error::new(
-                    core::ErrorKind::Unexpected,
-                    format!("{}, {}", e.to_string(), "failed to get local offset"),
-                ));
-            }
-            match tracing_subscriber::registry()
-                .with(fmt::layer().pretty().with_timer(timer.unwrap()).with_filter(log_level))
-                .try_init()
-            {
-                Ok(_) => std::ptr::null_mut(),
-                Err(e) => {
-                    unsafe {
-                        ALLOC_FN = None;
-                        FREE_FN = None;
-                        OB_LOG_HANDLER = None;
+        let mut ret: *mut opendal_error = std::ptr::null_mut(); 
+        TRACING_INIT_ONCE.call_once(|| {
+            if loghandler.is_null() {
+                let timer = OffsetTime::local_rfc_3339();
+                if let Err(e) = timer {
+                    ret = opendal_error::new(core::Error::new(
+                            core::ErrorKind::Unexpected,
+                            format!("{}, {}", e.to_string(), "failed to get local offset"),
+                        ));
+                }
+                match tracing_subscriber::registry()
+                    .with(fmt::layer().pretty().with_timer(timer.unwrap()).with_filter(log_level))
+                    .try_init()
+                {
+                    Ok(_) => {},
+                    Err(e) => {
+                        unsafe {
+                            ALLOC_FN = None;
+                            FREE_FN = None;
+                            OB_LOG_HANDLER = None;
+                        }
+                        let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                        ret = opendal_error::new(err);
                     }
-                    let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
-                    opendal_error::new(err)
+                }
+            } else {
+                match tracing_subscriber::registry()
+                        .with(ObLogLayer.with_filter(log_level)).try_init() {
+                    Ok(_) => {},
+                    Err(e) => {
+                        unsafe {
+                            ALLOC_FN = None;
+                            FREE_FN = None;
+                            OB_LOG_HANDLER = None;
+                        }
+                        let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
+                        ret = opendal_error::new(err);
+                    }
                 }
             }
-        } else {
-            match tracing_subscriber::registry()
-                    .with(ObLogLayer.with_filter(log_level)).try_init() {
-                Ok(_) => std::ptr::null_mut(),
-                Err(e) => {
-                    unsafe {
-                        ALLOC_FN = None;
-                        FREE_FN = None;
-                        OB_LOG_HANDLER = None;
-                    }
-                    let err = core::Error::new(core::ErrorKind::Unexpected, e.to_string());
-                    opendal_error::new(err)
-                }
-            }
-        }
+        });
+        ret
     });
     match handle_result(ret) {
         Ok(ret) => ret,
