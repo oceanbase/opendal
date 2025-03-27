@@ -627,27 +627,34 @@ TEST_F(ObDalTest, test_ob_multipart)
   ASSERT_FALSE(error);
 
   // generate write content
-  const int64_t data_size = 24 * 1024 * 1024LL;
+  const int64_t data_size = 48 * 1024 * 1024LL;
   char *data_str = static_cast<char *>(malloc(data_size));
   ASSERT_TRUE(data_str);
   ASSERT_TRUE(generate_random_bytes(data_str, data_size));
 
-  const int64_t range_count = 4;
+  const int64_t range_count = 8;
   std::vector<int64_t> borders;
   std::vector<std::tuple<int64_t, int64_t, int64_t>> ranges;
   ASSERT_TRUE(divide_interval_evenly(0, data_size - 1, range_count, ranges));
   shuffle_vec(ranges);
 
+  std::vector<std::thread> threads;
   for (int64_t step = 0; step < range_count; step++) {
     opendal_bytes data = {
       .data = (uint8_t *) (data_str + std::get<0>(ranges[step])),
       .len = (uintptr_t) (std::get<1>(ranges[step]) - std::get<0>(ranges[step])),
     };
 
-    opendal_result_writer_write result = opendal_multipart_writer_write(writer, &data, std::get<2>(ranges[step]));
-    dump_error(result.error);
-    ASSERT_EQ(nullptr, result.error);
-    ASSERT_EQ(result.size, data.len);
+    threads.push_back(std::thread([writer, data, step, ranges]() {
+      opendal_result_writer_write result = opendal_multipart_writer_write(writer, &data, std::get<2>(ranges[step]));
+      dump_error(result.error);
+      ASSERT_EQ(nullptr, result.error);
+      ASSERT_EQ(result.size, data.len);
+    }));
+  }
+
+  for (int step = 0; step < range_count; step++) {
+    threads[step].join();
   }
 
   error = opendal_multipart_writer_close(writer);

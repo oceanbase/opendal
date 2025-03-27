@@ -29,6 +29,7 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <thread>
 
 class ObDalTest : public ::testing::Test 
 {

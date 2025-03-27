@@ -16,6 +16,7 @@
 // under the License.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::select;
 use futures::Future;
@@ -134,7 +135,10 @@ pub struct MultipartWriter<W: MultipartWrite> {
     parts: Vec<MultipartPart>,
     cache: Option<Buffer>,
     next_part_number: usize,
-    part_counts: usize,
+
+
+    results: Arc<Mutex<Vec<MultipartPart>>>,
+    factory: fn(WriteInput<W>) -> BoxedStaticFuture<(WriteInput<W>, Result<MultipartPart>)>,
 
     tasks: ConcurrentTasks<WriteInput<W>, MultipartPart>,
 }
@@ -147,6 +151,39 @@ impl<W: MultipartWrite> MultipartWriter<W> {
     pub fn new(inner: W, executor: Option<Executor>, concurrent: usize) -> Self {
         let w = Arc::new(inner);
         let executor = executor.unwrap_or_default();
+        let factory = |input: WriteInput<W>| -> BoxedStaticFuture<(WriteInput<W>, Result<MultipartPart>)> {
+            Box::pin({
+                async move {
+                    let fut = input.w.write_part(
+                        &input.upload_id,
+                        input.part_number,
+                        input.bytes.len() as u64,
+                        input.bytes.clone(),
+                    );
+                    match input.executor.timeout() {
+                        None => {
+                            let result = fut.await;
+                            (input, result)
+                        }
+                        Some(timeout) => {
+                            let result = select! {
+                                result = fut.fuse() => {
+                                    result
+                                }
+                                _ = timeout.fuse() => {
+                                    Err(Error::new(
+                                        ErrorKind::Unexpected, "write part timeout")
+                                            .with_context("upload_id", input.upload_id.to_string())
+                                            .with_context("part_number", input.part_number.to_string())
+                                            .set_temporary())
+                                }
+                            };
+                            (input, result)
+                        }
+                    }
+                }
+            })
+        };
         Self {
             w,
             executor: executor.clone(),
@@ -154,41 +191,9 @@ impl<W: MultipartWrite> MultipartWriter<W> {
             parts: Vec::new(),
             cache: None,
             next_part_number: 0,
-            part_counts: 0,
-
-            tasks: ConcurrentTasks::new(executor, concurrent, |input| {
-                Box::pin({
-                    async move {
-                        let fut = input.w.write_part(
-                            &input.upload_id,
-                            input.part_number,
-                            input.bytes.len() as u64,
-                            input.bytes.clone(),
-                        );
-                        match input.executor.timeout() {
-                            None => {
-                                let result = fut.await;
-                                (input, result)
-                            }
-                            Some(timeout) => {
-                                let result = select! {
-                                    result = fut.fuse() => {
-                                        result
-                                    }
-                                    _ = timeout.fuse() => {
-                                        Err(Error::new(
-                                            ErrorKind::Unexpected, "write part timeout")
-                                                .with_context("upload_id", input.upload_id.to_string())
-                                                .with_context("part_number", input.part_number.to_string())
-                                                .set_temporary())
-                                    }
-                                };
-                                (input, result)
-                            }
-                        }
-                    }
-                })
-            }),
+            results: Arc::new(Mutex::new(Vec::new())),
+            factory: factory,
+            tasks: ConcurrentTasks::new(executor, concurrent, factory),
         }
     }
 
@@ -319,43 +324,40 @@ where
         Ok(())
     }
 
+    // Since ob may use multiple threads to execute write_with_part_id at the same time, 
+    // self.factory is called directly to initiate IO
     async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
         let upload_id = self.upload_id.clone()
             .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
         let bytes = bs;
-        self.tasks
-            .execute(WriteInput {
-                w: self.w.clone(),
-                executor: self.executor.clone(),
-                upload_id: upload_id.clone(),
-                part_number: part_id,
-                bytes,
-            })
-            .await?;
-        // part_counts indicates the number of parts that have currently been written.
-        self.part_counts += 1;
-        Ok(())
+        let (_, o) = (self.factory)(WriteInput {
+            w: self.w.clone(),
+            executor: self.executor.clone(),
+            upload_id: upload_id.clone(),
+            part_number: part_id,
+            bytes,
+        }).await;
+        return match o {
+            Ok(o) => {
+                // std::sync::mutex cannot be called across await
+                let mut results = self.results.lock().unwrap();
+                results.push(o);
+                Ok(())
+            }
+            Err(err) => Err(err)
+        }
     }
 
     async fn close(&mut self) -> Result<()> {
         let upload_id = self.upload_id.clone()
             .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
-        loop {
-            let Some(result) = self.tasks.next().await.transpose()? else {
-                break;
-            };
-            self.parts.push(result)
+        {
+            let results = self.results.lock().unwrap(); 
+            for o in results.iter() {
+                self.parts.push(o.clone());
+            }
         }
-
-        if self.parts.len() != self.part_counts {
-            return Err(Error::new(
-                ErrorKind::Unexpected,
-                "multipart part numbers mismatch, please report bug to obdal",
-            )
-            .with_context("expected", self.part_counts)
-            .with_context("actual", self.parts.len())
-            .with_context("upload_id", upload_id));
-        }
+        
         self.w.complete_part(&upload_id, &self.parts).await
     }
 
