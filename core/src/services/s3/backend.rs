@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -504,11 +505,17 @@ impl S3Builder {
 
         // If endpoint contains bucket name, we should trim them.
         endpoint = endpoint.replace(&format!("//{bucket}."), "//");
-
+        
+        let mut is_enpoint_ip_type = false;
         // Omit default ports if specified.
         if let Ok(url) = Url::from_str(&endpoint) {
             // Remove the trailing `/` of root path.
             endpoint = url.to_string().trim_end_matches('/').to_string();
+            if let Some(host) = url.host_str() {
+                if host.parse::<Ipv4Addr>().is_ok() {
+                    is_enpoint_ip_type = true;
+                }
+            }
         }
 
         // Update with endpoint templates.
@@ -521,7 +528,7 @@ impl S3Builder {
         };
 
         // Apply virtual host style.
-        if self.config.enable_virtual_host_style {
+        if self.config.enable_virtual_host_style && !is_enpoint_ip_type {
             endpoint = endpoint.replace("//", &format!("//{bucket}."))
         } else {
             write!(endpoint, "/{bucket}").expect("write into string must succeed");
