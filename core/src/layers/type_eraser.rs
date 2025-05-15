@@ -53,10 +53,12 @@ impl<A: Access> LayeredAccess for TypeEraseAccessor<A> {
     type Inner = A;
     type Reader = oio::Reader;
     type Writer = oio::Writer;
+    type ObMultipartWriter = oio::ObMultipartWriter;
     type Lister = oio::Lister;
     type Deleter = oio::Deleter;
     type BlockingReader = oio::BlockingReader;
     type BlockingWriter = oio::BlockingWriter;
+    type BlockingObMultipartWriter = oio::BlockingObMultipartWriter;
     type BlockingLister = oio::BlockingLister;
     type BlockingDeleter = oio::BlockingDeleter;
 
@@ -76,6 +78,13 @@ impl<A: Access> LayeredAccess for TypeEraseAccessor<A> {
             .write(path, args)
             .await
             .map(|(rp, w)| (rp, Box::new(w) as oio::Writer))
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner
+            .ob_multipart_write(path, args)
+            .await
+            .map(|(rp, w)| (rp, Box::new(w) as oio::ObMultipartWriter))
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
@@ -102,6 +111,12 @@ impl<A: Access> LayeredAccess for TypeEraseAccessor<A> {
         self.inner
             .blocking_write(path, args)
             .map(|(rp, w)| (rp, Box::new(w) as oio::BlockingWriter))
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner
+            .blocking_ob_multipart_write(path, args)
+            .map(|(rp, w)| (rp, Box::new(w) as oio::BlockingObMultipartWriter))
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {

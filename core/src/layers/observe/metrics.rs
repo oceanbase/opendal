@@ -177,6 +177,8 @@ impl<A: Access, I: MetricsIntercept> LayeredAccess for MetricsAccessor<A, I> {
     type BlockingReader = MetricsWrapper<A::BlockingReader, I>;
     type Writer = MetricsWrapper<A::Writer, I>;
     type BlockingWriter = MetricsWrapper<A::BlockingWriter, I>;
+    type ObMultipartWriter = MetricsWrapper<A::ObMultipartWriter, I>;
+    type BlockingObMultipartWriter = MetricsWrapper<A::BlockingObMultipartWriter, I>;
     type Lister = MetricsWrapper<A::Lister, I>;
     type BlockingLister = MetricsWrapper<A::BlockingLister, I>;
     type Deleter = MetricsWrapper<A::Deleter, I>;
@@ -268,6 +270,50 @@ impl<A: Access, I: MetricsIntercept> LayeredAccess for MetricsAccessor<A, I> {
         let (rp, writer) = self
             .inner
             .write(path, args)
+            .await
+            .map(|v| {
+                self.interceptor.observe_operation_duration_seconds(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    path,
+                    op,
+                    start.elapsed(),
+                );
+                v
+            })
+            .map_err(|err| {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    path,
+                    op,
+                    err.kind(),
+                );
+                err
+            })?;
+
+        Ok((
+            rp,
+            MetricsWrapper::new(
+                writer,
+                self.interceptor.clone(),
+                self.scheme,
+                self.namespace.clone(),
+                self.root.clone(),
+                path.to_string(),
+            ),
+        ))
+    }
+
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let op = Operation::ObMultipartWrite;
+
+        let start = Instant::now();
+        let (rp, writer) = self
+            .inner
+            .ob_multipart_write(path, args)
             .await
             .map(|v| {
                 self.interceptor.observe_operation_duration_seconds(
@@ -597,6 +643,49 @@ impl<A: Access, I: MetricsIntercept> LayeredAccess for MetricsAccessor<A, I> {
         let (rp, writer) = self
             .inner
             .blocking_write(path, args)
+            .map(|v| {
+                self.interceptor.observe_operation_duration_seconds(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    path,
+                    op,
+                    start.elapsed(),
+                );
+                v
+            })
+            .map_err(|err| {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    path,
+                    op,
+                    err.kind(),
+                );
+                err
+            })?;
+
+        Ok((
+            rp,
+            MetricsWrapper::new(
+                writer,
+                self.interceptor.clone(),
+                self.scheme,
+                self.namespace.clone(),
+                self.root.clone(),
+                path.to_string(),
+            ),
+        ))
+    }
+
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let op = Operation::BlockingObMultipartWrite;
+
+        let start = Instant::now();
+        let (rp, writer) = self
+            .inner
+            .blocking_ob_multipart_write(path, args)
             .map(|v| {
                 self.interceptor.observe_operation_duration_seconds(
                     self.scheme,
@@ -966,6 +1055,47 @@ impl<R: oio::Write, I: MetricsIntercept> oio::Write for MetricsWrapper<R, I> {
         res
     }
 
+    async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let op = Operation::WriterWithOffset;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_offset(offset, bs).await {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
     async fn close(&mut self) -> Result<()> {
         let op = Operation::WriterClose;
 
@@ -1069,6 +1199,47 @@ impl<R: oio::BlockingWrite, I: MetricsIntercept> oio::BlockingWrite for MetricsW
         res
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let op = Operation::BlockingWriterWithOffset;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_offset(offset, bs) {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
     fn close(&mut self) -> Result<()> {
         let op = Operation::BlockingWriterClose;
 
@@ -1095,6 +1266,266 @@ impl<R: oio::BlockingWrite, I: MetricsIntercept> oio::BlockingWrite for MetricsW
             &self.path,
             op,
             start.elapsed(),
+        );
+        res
+    }
+}
+
+impl<R: oio::ObMultipartWrite, I: MetricsIntercept> oio::ObMultipartWrite for MetricsWrapper<R, I> {
+    async fn initiate_part(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterInitiatePart;
+        let start = Instant::now();
+        
+        let res = match self.inner.initiate_part().await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
+        );
+        res
+    }
+
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let op = Operation::ObMultiPartWriterWriteWithPartId;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_part_id(bs, part_id).await {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterClose;
+        let start = Instant::now();
+        
+        let res = match self.inner.close().await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
+        );
+        res
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterAbort;
+        let start = Instant::now();
+        
+        let res = match self.inner.abort().await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
+        );
+        res
+    }
+}
+
+impl<R: oio::BlockingObMultipartWrite, I: MetricsIntercept> oio::BlockingObMultipartWrite for MetricsWrapper<R, I> {
+    fn initiate_part(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterInitiatePart;
+        let start = Instant::now();
+        
+        let res = match self.inner.initiate_part() {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
+        );
+        res
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        let op = Operation::ObMultiPartWriterWriteWithPartId;
+
+        let start = Instant::now();
+        let size = bs.len();
+
+        let res = match self.inner.write_with_part_id(bs, part_id) {
+            Ok(()) => {
+                self.interceptor.observe_operation_bytes(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    size,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
+    fn close(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterClose;
+        let start = Instant::now();
+        
+        let res = match self.inner.close() {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
+        );
+        res
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        let op = Operation::ObMultipartWriterAbort;
+        let start = Instant::now();
+        
+        let res = match self.inner.abort() {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme, 
+            self.namespace.clone(), 
+            self.root.clone(), 
+            &self.path, 
+            op, 
+            start.elapsed()
         );
         res
     }
@@ -1201,6 +1632,36 @@ impl<R: oio::Delete, I: MetricsIntercept> oio::Delete for MetricsWrapper<R, I> {
         let start = Instant::now();
 
         let res = match self.inner.flush().await {
+            Ok(entry) => Ok(entry),
+            Err(err) => {
+                self.interceptor.observe_operation_errors_total(
+                    self.scheme,
+                    self.namespace.clone(),
+                    self.root.clone(),
+                    &self.path,
+                    op,
+                    err.kind(),
+                );
+                Err(err)
+            }
+        };
+        self.interceptor.observe_operation_duration_seconds(
+            self.scheme,
+            self.namespace.clone(),
+            self.root.clone(),
+            &self.path,
+            op,
+            start.elapsed(),
+        );
+        res
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let op = Operation::DeleterDeleted;
+
+        let start = Instant::now();
+
+        let res = match self.inner.deleted(path, args) {
             Ok(entry) => Ok(entry),
             Err(err) => {
                 self.interceptor.observe_operation_errors_total(

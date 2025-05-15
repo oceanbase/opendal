@@ -17,7 +17,8 @@
 
 use ::opendal as core;
 use std::ffi::c_void;
-
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
 use super::*;
 
 /// \brief BlockingLister is designed to list entries at given path in a blocking
@@ -58,35 +59,47 @@ impl opendal_lister {
     /// @see opendal_operator_list()
     #[no_mangle]
     pub unsafe extern "C" fn opendal_lister_next(&mut self) -> opendal_result_lister_next {
-        let e = self.deref_mut().next();
-        if e.is_none() {
-            return opendal_result_lister_next {
-                entry: std::ptr::null_mut(),
-                error: std::ptr::null_mut(),
-            };
-        }
-
-        match e.unwrap() {
-            Ok(e) => {
-                let ent = Box::into_raw(Box::new(opendal_entry::new(e)));
-                opendal_result_lister_next {
-                    entry: ent,
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let e = self.deref_mut().next();
+            if e.is_none() {
+                return opendal_result_lister_next {
+                    entry: std::ptr::null_mut(),
                     error: std::ptr::null_mut(),
-                }
+                };
             }
-            Err(e) => opendal_result_lister_next {
+
+            match e.unwrap() {
+                Ok(e) => {
+                    let ent = Box::into_raw(Box::new(opendal_entry::new(e)));
+                    opendal_result_lister_next {
+                        entry: ent,
+                        error: std::ptr::null_mut(),
+                    }
+                }
+                Err(e) => opendal_result_lister_next {
+                    entry: std::ptr::null_mut(),
+                    error: opendal_error::new(e),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_lister_next {
                 entry: std::ptr::null_mut(),
-                error: opendal_error::new(e),
-            },
+                error,
+            }
         }
     }
 
     /// \brief Free the heap-allocated metadata used by opendal_lister
     #[no_mangle]
     pub unsafe extern "C" fn opendal_lister_free(ptr: *mut opendal_lister) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::BlockingLister));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingLister));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

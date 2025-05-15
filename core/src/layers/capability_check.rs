@@ -83,10 +83,12 @@ impl<A: Access> LayeredAccess for CapabilityAccessor<A> {
     type Inner = A;
     type Reader = A::Reader;
     type Writer = A::Writer;
+    type ObMultipartWriter = A::ObMultipartWriter;
     type Lister = A::Lister;
     type Deleter = A::Deleter;
     type BlockingReader = A::BlockingReader;
     type BlockingWriter = A::BlockingWriter;
+    type BlockingObMultipartWriter = A::BlockingObMultipartWriter;
     type BlockingLister = A::BlockingLister;
     type BlockingDeleter = A::BlockingDeleter;
 
@@ -123,6 +125,43 @@ impl<A: Access> LayeredAccess for CapabilityAccessor<A> {
         }
 
         self.inner.write(path, args).await
+    }
+
+    // TODO
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> crate::Result<(RpWrite, Self::ObMultipartWriter)> {
+        let capability = self.info.full_capability();
+
+        if !capability.write_can_multi {
+            return Err(new_unsupported_error(
+                self.info.as_ref(), 
+                Operation::ObMultipartWrite, 
+                "multi",
+            ));
+        }
+
+        if !capability.write_with_content_type && args.content_type().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::ObMultipartWrite,
+                "content_type",
+            ));
+        }
+        if !capability.write_with_cache_control && args.cache_control().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::ObMultipartWrite,
+                "cache_control",
+            ));
+        }
+        if !capability.write_with_content_disposition && args.content_disposition().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::ObMultipartWrite,
+                "content_disposition",
+            ));
+        }
+
+        self.inner.ob_multipart_write(path, args).await
     }
 
     async fn delete(&self) -> crate::Result<(RpDelete, Self::Deleter)> {
@@ -181,6 +220,47 @@ impl<A: Access> LayeredAccess for CapabilityAccessor<A> {
         self.inner.blocking_write(path, args)
     }
 
+    // TODO
+    fn blocking_ob_multipart_write(
+        &self, 
+        path: &str, 
+        args: OpWrite
+    ) -> crate::Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let capability = self.info.full_capability();
+
+        if !capability.write_can_multi {
+            return Err(new_unsupported_error(
+                self.info.as_ref(), 
+                Operation::BlockingObMultipartWrite, 
+                "multi",
+            ));
+        }
+
+        if !capability.write_with_content_type && args.content_type().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::BlockingObMultipartWrite,
+                "content_type",
+            ));
+        }
+        if !capability.write_with_cache_control && args.cache_control().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::BlockingObMultipartWrite,
+                "cache_control",
+            ));
+        }
+        if !capability.write_with_content_disposition && args.content_disposition().is_some() {
+            return Err(new_unsupported_error(
+                self.info.as_ref(),
+                Operation::BlockingObMultipartWrite,
+                "content_disposition",
+            ));
+        }
+
+        self.inner.blocking_ob_multipart_write(path, args)
+    }
+
     fn blocking_delete(&self) -> crate::Result<(RpDelete, Self::BlockingDeleter)> {
         self.inner.blocking_delete()
     }
@@ -216,10 +296,12 @@ mod tests {
     impl Access for MockService {
         type Reader = oio::Reader;
         type Writer = oio::Writer;
+        type ObMultipartWriter = oio::ObMultipartWriter;
         type Lister = oio::Lister;
         type Deleter = oio::Deleter;
         type BlockingReader = oio::BlockingReader;
         type BlockingWriter = oio::BlockingWriter;
+        type BlockingObMultipartWriter = oio::BlockingObMultipartWriter;
         type BlockingLister = oio::BlockingLister;
         type BlockingDeleter = oio::BlockingDeleter;
 

@@ -17,6 +17,7 @@
 
 use std::future::Future;
 use std::time::Duration;
+use std::collections::HashMap;
 
 use futures::Stream;
 use futures::StreamExt;
@@ -324,6 +325,44 @@ impl Operator {
                 let rp = inner.stat(&path, args).await?;
                 Ok(rp.into_metadata())
             },
+        )
+    }
+
+    /// TODO 增加注释
+    pub fn put_object_tagging_with(
+        &self,
+        path: &str
+    ) -> FuturePutObjTag<impl Future<Output = Result<()>>> {
+        let path = normalize_path(path);
+
+        OperatorFuture::new(
+            self.inner().clone(),
+            path,
+            OpPutObjTag::default(),
+            |inner, path, args| async move {
+                let _rp = inner.put_object_tagging(&path, args).await?;
+                Ok(())
+            },
+        )
+    }
+
+    /// TODO 增加注释
+    pub fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> FutureGetObjTag<impl Future<Output = Result<HashMap<String, String>>>> {
+        let path = normalize_path(path);
+
+        OperatorFuture::new(
+            self.inner().clone(),
+            path,
+            (),
+            |inner, path, args| async move {
+                let _ = args;
+                let rp = inner.get_object_tagging(&path).await?;
+                let tag_set = rp.tag_set();
+                Ok(tag_set)
+            }
         )
     }
 
@@ -952,6 +991,11 @@ impl Operator {
         self.writer_with(path).await
     }
 
+    ///
+    pub async fn ob_multipart_writer(&self, path: &str) -> Result<ObMultipartWriter> {
+        self.ob_multipart_writer_with(path).await
+    } 
+
     /// Create a writer for streaming data to the given path with more options.
     ///
     /// # Usages
@@ -1251,6 +1295,34 @@ impl Operator {
         )
     }
 
+    ///
+    pub fn ob_multipart_writer_with(&self, path: &str) -> FutureObMultipartWriter<impl Future<Output = Result<ObMultipartWriter>>> {
+        let path = normalize_path(path);
+
+        OperatorFuture::new(
+            self.inner().clone(),
+            path,
+            (
+                OpWrite::default().merge_executor(self.default_executor.clone()),
+                OpWriter::default(),
+            ),
+            |inner, path, (args, options)| async move {
+                if !validate_path(&path, EntryMode::FILE) {
+                    return Err(
+                        Error::new(ErrorKind::IsADirectory, "write path is a directory")
+                            .with_operation("Operator::writer")
+                            .with_context("service", inner.info().scheme().into_static())
+                            .with_context("path", &path),
+                    );
+                }
+
+                let context = ObMultipartWriteContext::new(inner, path, args, options);
+                let w = ObMultipartWriter::new(context).await?;
+                Ok(w)
+            },
+        )
+    }
+
     /// Write data with extra options.
     ///
     /// # Notes
@@ -1402,6 +1474,38 @@ impl Operator {
     /// let _ = op
     ///     .write_with("path/to/file", bs)
     ///     .content_disposition("attachment; filename=\"filename.jpg\"")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## `content_encoding`
+    ///
+    /// Sets Content-Encoding header for this write request.
+    ///
+    /// ### Capability
+    ///
+    /// Check [`Capability::write_with_content_encoding`] before using this feature.
+    ///
+    /// ### Behavior
+    ///
+    /// - If supported, sets Content-Encoding as system metadata on the target file
+    /// - The value should follow HTTP Content-Encoding header format
+    /// - If not supported, the value will be ignored
+    ///
+    /// This operation allows specifying the content encoding for the written content.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// # use opendal::Result;
+    /// # use opendal::Operator;
+    /// use bytes::Bytes;
+    /// # async fn test(op: Operator) -> Result<()> {
+    /// let bs = b"hello, world!".to_vec();
+    /// let _ = op
+    ///     .write_with("path/to/file", bs)
+    ///     .content_encoding("br")
     ///     .await?;
     /// # Ok(())
     /// # }

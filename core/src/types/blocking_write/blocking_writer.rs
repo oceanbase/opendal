@@ -77,6 +77,11 @@ impl BlockingWriter {
         Ok(())
     }
 
+    /// Write with offset
+    pub fn write_with_offset(&mut self, offset: u64, bs: impl Into<Buffer>) -> Result<()> {
+        self.inner.write_with_offset(offset, bs.into())
+    }
+
     /// Close the writer and make sure all data have been committed.
     ///
     /// ## Notes
@@ -85,6 +90,11 @@ impl BlockingWriter {
     /// aborted, otherwise an unexpected error could be returned.
     pub fn close(&mut self) -> Result<()> {
         self.inner.close()
+    }
+
+    /// Abort the pending writer.
+    pub fn abort(&mut self) -> Result<()> {
+        self.inner.abort()
     }
 
     /// Convert writer into [`StdWriter`] which implements [`std::io::Write`],

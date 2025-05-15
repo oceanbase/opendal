@@ -99,6 +99,16 @@ impl BlockingDeleter {
         Ok(deleted)
     }
 
+    /// check a path is deleted
+    pub fn deleted(&mut self, input: impl IntoDeleteInput) -> Result<bool> {
+        let input = input.into_delete_input();
+        let mut op = OpDelete::default();
+        if let Some(version) = &input.version {
+            op = op.with_version(version);
+        }
+        self.deleter.deleted(&input.path, op)
+    }
+
     /// Close the deleter, this will flush the deleter and wait until all paths are deleted.
     pub fn close(&mut self) -> Result<()> {
         loop {
@@ -108,5 +118,10 @@ impl BlockingDeleter {
             }
         }
         Ok(())
+    }
+
+    /// get cur size
+    pub fn cur_size(&self) -> usize {
+        self.cur_size
     }
 }

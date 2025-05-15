@@ -165,10 +165,12 @@ pub struct FsBackend {
 impl Access for FsBackend {
     type Reader = FsReader<tokio::fs::File>;
     type Writer = FsWriters;
+    type ObMultipartWriter = ();
     type Lister = Option<FsLister<tokio::fs::ReadDir>>;
     type Deleter = oio::OneShotDeleter<FsDeleter>;
     type BlockingReader = FsReader<std::fs::File>;
     type BlockingWriter = FsWriter<std::fs::File>;
+    type BlockingObMultipartWriter = ();
     type BlockingLister = Option<FsLister<std::fs::ReadDir>>;
     type BlockingDeleter = oio::OneShotDeleter<FsDeleter>;
 

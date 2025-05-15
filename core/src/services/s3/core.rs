@@ -31,9 +31,9 @@ use constants::X_AMZ_META_PREFIX;
 use http::header::HeaderName;
 use http::header::CACHE_CONTROL;
 use http::header::CONTENT_DISPOSITION;
+use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::header::HOST;
 use http::header::IF_MATCH;
 use http::header::IF_NONE_MATCH;
 use http::HeaderValue;
@@ -44,6 +44,8 @@ use reqsign::AwsCredentialLoad;
 use reqsign::AwsV4Signer;
 use serde::Deserialize;
 use serde::Serialize;
+use md5::{Md5, Digest};
+use crc32fast::Hasher;
 
 use crate::raw::*;
 use crate::*;
@@ -165,7 +167,7 @@ impl S3Core {
         // As discussed in <https://github.com/seanmonstar/reqwest/issues/1809>,
         // google server could send RST_STREAM of PROTOCOL_ERROR if our request
         // contains host header.
-        req.headers_mut().remove(HOST);
+        // req.headers_mut().remove(HOST);
 
         Ok(())
     }
@@ -187,7 +189,7 @@ impl S3Core {
         // As discussed in <https://github.com/seanmonstar/reqwest/issues/1809>,
         // google server could send RST_STREAM of PROTOCOL_ERROR if our request
         // contains host header.
-        req.headers_mut().remove(HOST);
+        // req.headers_mut().remove(HOST);
 
         Ok(())
     }
@@ -265,7 +267,19 @@ impl S3Core {
                 body.clone()
                     .for_each(|b| crc = crc32c::crc32c_append(crc, &b));
                 Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
-            }
+            },
+            Some(ChecksumAlgorithm::Crc32) => {
+                let mut hasher = Hasher::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
+            },
+            Some(ChecksumAlgorithm::Md5) => {
+                let mut hasher = Md5::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest))
+            },
         }
     }
     pub fn insert_checksum_header(
@@ -284,7 +298,9 @@ impl S3Core {
         mut req: http::request::Builder,
     ) -> http::request::Builder {
         if let Some(checksum_algorithm) = self.checksum_algorithm.as_ref() {
-            req = req.header("x-amz-checksum-algorithm", checksum_algorithm.to_string());
+            if checksum_algorithm != &ChecksumAlgorithm::Md5 {
+                req = req.header("x-amz-checksum-algorithm", checksum_algorithm.to_string());
+            }
         }
         req
     }
@@ -452,6 +468,10 @@ impl S3Core {
             req = req.header(CONTENT_DISPOSITION, pos)
         }
 
+        if let Some(encoding) = args.content_encoding() {
+            req = req.header(CONTENT_ENCODING, encoding);
+        }
+
         if let Some(cache_control) = args.cache_control() {
             req = req.header(CACHE_CONTROL, cache_control)
         }
@@ -489,6 +509,39 @@ impl S3Core {
         let req = req.body(body).map_err(new_request_build_error)?;
 
         Ok(req)
+    }
+
+    pub async fn s3_put_object_tagging(
+        &self,
+        path: &str,
+        args: OpPutObjTag,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+
+        let url = format!("{}/{}?tagging", self.endpoint, percent_encode_path(&p));
+
+        let tagging: Tagging = args.into();
+        let content = quick_xml::se::to_string(&tagging).map_err(new_xml_deserialize_error)?;
+
+        let mut req = Request::put(&url)
+            .body(Buffer::from(Bytes::from(content)))
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+
+        self.send(req).await
+    }
+
+    pub async fn s3_get_object_tagging(&self, path: &str) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let url = format!("{}/{}?tagging", self.endpoint, percent_encode_path(&p));
+
+        let mut req = Request::get(&url)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
     }
 
     pub async fn s3_head_object(&self, path: &str, args: OpStat) -> Result<Response<Buffer>> {
@@ -585,6 +638,43 @@ impl S3Core {
         self.send(req).await
     }
 
+    pub async fn s3_list_objects_v1(
+        &self,
+        path: &str,
+        next_marker: &str,
+        delimiter: &str,
+        limit: Option<usize>,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let mut queries = vec![];
+        if !p.is_empty() {
+            queries.push(format!("prefix={}", percent_encode_path(&p)));
+        }
+        if !delimiter.is_empty() {
+            queries.push(format!("delimiter={delimiter}"));
+        }
+        if let Some(limit) = limit {
+            queries.push(format!("max-keys={limit}"));
+        }
+        if !next_marker.is_empty() {
+            queries.push(format!("marker={next_marker}"));
+        }
+
+        let url = if queries.is_empty() {
+            self.endpoint.to_string()
+        } else {
+            format!("{}?{}", self.endpoint, queries.join("&"))
+        };
+
+        let mut req = Request::get(&url)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+
+        self.send(req).await
+    }
+
     pub async fn s3_list_objects(
         &self,
         path: &str,
@@ -655,10 +745,20 @@ impl S3Core {
         if let Some(cache_control) = args.cache_control() {
             req = req.header(CACHE_CONTROL, cache_control)
         }
+        
+        // access gcs via s3 require this header
+        req = req.header(CONTENT_LENGTH, 0);
 
         // Set storage class header
         if let Some(v) = &self.default_storage_class {
             req = req.header(HeaderName::from_static(constants::X_AMZ_STORAGE_CLASS), v);
+        }
+
+        // Set user metadata headers.
+        if let Some(user_metadata) = args.user_metadata() {
+            for (key, value) in user_metadata {
+                req = req.header(format!("{X_AMZ_META_PREFIX}{key}"), value)
+            }
         }
 
         // Set SSE headers.
@@ -900,6 +1000,8 @@ pub struct CompleteMultipartUploadRequestPart {
     pub etag: String,
     #[serde(rename = "ChecksumCRC32C", skip_serializing_if = "Option::is_none")]
     pub checksum_crc32c: Option<String>,
+    #[serde(rename = "ChecksumCRC32", skip_serializing_if = "Option::is_none")]
+    pub checksum_crc32: Option<String>,
 }
 
 /// Request of DeleteObjects.
@@ -957,6 +1059,17 @@ pub struct ListObjectsOutput {
     pub contents: Vec<ListObjectsOutputContent>,
 }
 
+/// Oubput of ListObjectsV1
+#[derive(Default, Debug, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ListObjectsOutputV1 {
+    pub is_truncated: Option<bool>,
+    pub marker: Option<String>,
+    pub next_marker: Option<String>,
+    pub common_prefixes: Vec<OutputCommonPrefix>,
+    pub contents: Vec<ListObjectsOutputContent>,
+}
+
 #[derive(Default, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ListObjectsOutputContent {
@@ -996,13 +1109,70 @@ pub struct ListObjectVersionsOutputVersion {
     pub etag: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tag {
+    // #[serde(rename = "Key")]
+    pub key: String,
+    // #[serde(rename = "Value")]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagSet {
+    pub tag: Option<Vec<Tag>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tagging {
+    pub tag_set: TagSet,
+}
+
+impl Into<RpGetObjTag> for Tagging {
+    fn into(self) -> RpGetObjTag {
+        match self.tag_set.tag {
+            Some(tag) => RpGetObjTag::new().with_tag_set(
+                tag.iter()
+                    .map(|item| (item.key.to_string(), item.value.to_string()))
+                    .collect(),
+            ),
+            None => RpGetObjTag::new(),
+        }
+    }
+}
+
+impl From<OpPutObjTag> for Tagging {
+    fn from(op: OpPutObjTag) -> Self {
+        let tag: Vec<Tag> = op
+            .tag_set()
+            .iter()
+            .map(|(k, v)| Tag {
+                key: k.to_string(),
+                value: v.to_string(),
+            })
+            .collect();
+
+        Tagging {
+            tag_set: TagSet { tag: Some(tag) },
+        }
+    }
+}
+
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub enum ChecksumAlgorithm {
     Crc32c,
+    Crc32,
+    Md5,
 }
 impl ChecksumAlgorithm {
     pub fn to_header_name(&self) -> HeaderName {
         match self {
             Self::Crc32c => HeaderName::from_static("x-amz-checksum-crc32c"),
+            Self::Crc32 => HeaderName::from_static("x-amz-checksum-crc32"),
+            Self::Md5 => HeaderName::try_from("Content-MD5").expect("Invalid header name for Md5"),
         }
     }
 }
@@ -1013,6 +1183,8 @@ impl Display for ChecksumAlgorithm {
             "{}",
             match self {
                 Self::Crc32c => "CRC32C",
+                Self::Crc32 => "CRC32",
+                Self::Md5 => "MD5",
             }
         )
     }
@@ -1020,10 +1192,10 @@ impl Display for ChecksumAlgorithm {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use bytes::Buf;
     use bytes::Bytes;
-
-    use super::*;
+    use std::collections::HashMap;
 
     /// This example is from https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html#API_CreateMultipartUpload_Examples
     #[test]
@@ -1043,6 +1215,73 @@ mod tests {
         assert_eq!(
             out.upload_id,
             "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA"
+        )
+    }
+
+    #[test]
+    fn test_serialize_tagging() {
+        let mut tag_set = HashMap::new();
+        tag_set.insert("key2".to_string(), "value2".to_string());
+        tag_set.insert("key1".to_string(), "value1".to_string());
+        let op_put_obj_tag = OpPutObjTag::new().with_tag_set(tag_set);
+
+        let tagging: Tagging = op_put_obj_tag.into();
+        let actual = quick_xml::se::to_string(&tagging).expect("must succeed");
+
+        pretty_assertions::assert_eq!(
+            actual,
+            r#"<Tagging>
+            <TagSet>
+               <Tag>
+                  <Key>key2</Key>
+                  <Value>value2</Value>
+               </Tag>
+               <Tag>
+                  <Key>key1</Key>
+                  <Value>value1</Value>
+               </Tag>
+            </TagSet>
+         </Tagging>"#
+                // Cleanup space and new line
+                .replace([' ', '\n'], "")
+        )
+    }
+
+    #[test]
+    fn test_deserialize_tagging() {
+        let bs = Bytes::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <Tagging>
+               <TagSet>
+                  <Tag>
+                     <Key>string</Key>
+                     <Value>string</Value>
+                  </Tag>
+                  <Tag>
+                     <Key>string2</Key>
+                     <Value>string2</Value>
+                  </Tag>
+               </TagSet>
+            </Tagging>"#,
+        );
+
+        let out: Tagging = quick_xml::de::from_reader(bs.reader()).expect("must success");
+        pretty_assertions::assert_eq!(
+            out,
+            Tagging {
+                tag_set: TagSet {
+                    tag: Some(vec![
+                        Tag {
+                            key: "string".to_string(),
+                            value: "string".to_string(),
+                        },
+                        Tag {
+                            key: "string2".to_string(),
+                            value: "string2".to_string(),
+                        },
+                    ])
+                }
+            }
         )
     }
 

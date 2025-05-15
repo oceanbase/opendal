@@ -484,10 +484,12 @@ pub struct AzblobBackend {
 impl Access for AzblobBackend {
     type Reader = HttpBody;
     type Writer = AzblobWriters;
+    type ObMultipartWriter = ();
     type Lister = oio::PageLister<AzblobLister>;
     type Deleter = oio::BatchDeleter<AzblobDeleter>;
     type BlockingReader = ();
     type BlockingWriter = ();
+    type BlockingObMultipartWriter = ();
     type BlockingLister = ();
     type BlockingDeleter = ();
 

@@ -35,22 +35,40 @@ pub enum Operation {
     Write,
     /// Operation for [`crate::raw::oio::Write::write`]
     WriterWrite,
+    /// Operation for [`crate::raw::oio::Write::write_with_offset`]
+    WriterWithOffset,
     /// Operation for [`crate::raw::oio::Write::close`]
     WriterClose,
     /// Operation for [`crate::raw::oio::Write::abort`]
     WriterAbort,
+    /// Operation for [`crate::raw::Access::ob_multipart_write`]
+    ObMultipartWrite,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::initiate_part`]
+    ObMultipartWriterInitiatePart,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::write_with_part_id`]
+    ObMultiPartWriterWriteWithPartId,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::close`]
+    ObMultipartWriterClose,
+    /// Operation for [`crate::raw::oio::ObMultipartWrite::abort`]
+    ObMultipartWriterAbort,
     /// Operation for [`crate::raw::Access::copy`]
     Copy,
     /// Operation for [`crate::raw::Access::rename`]
     Rename,
     /// Operation for [`crate::raw::Access::stat`]
     Stat,
+    /// Operation for [`crate::raw::Access::put_object_tagging`]
+    PutObjectTagging,
+    /// Operation for [`crate::raw::Access::get_object_tagging`]
+    GetObjectTagging,
     /// Operation for [`crate::raw::Access::delete`]
     Delete,
     /// Operation for [`crate::raw::oio::Delete::delete`]
     DeleterDelete,
     /// Operation for [`crate::raw::oio::Delete::flush`]
     DeleterFlush,
+    /// Operation for [`crate::raw::oio::Delete::deleted`]
+    DeleterDeleted,
     /// Operation for [`crate::raw::Access::list`]
     List,
     /// Operation for [`crate::raw::oio::List::next`]
@@ -67,20 +85,38 @@ pub enum Operation {
     BlockingWrite,
     /// Operation for [`crate::raw::oio::BlockingWrite::write`]
     BlockingWriterWrite,
+    /// Operation for [`crate::raw::oio::BlockingWrite::write_with_offset`]
+    BlockingWriterWithOffset,
     /// Operation for [`crate::raw::oio::BlockingWrite::close`]
     BlockingWriterClose,
+    /// Operation for [`crate::raw::Access::blocking_ob_multipart_write`]
+    BlockingObMultipartWrite,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::initiate_part`]
+    BlockingObMultipartWriterInitiatePart,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::write_with_part_id`]
+    BlockingObMultiPartWriterWriteWithPartId,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::close`]
+    BlockingObMultipartWriterClose,
+    /// Operation for [`crate::raw::oio::BlockingObMultipartWrite::abort`]
+    BlockingObMultipartWriterAbort,
     /// Operation for [`crate::raw::Access::blocking_copy`]
     BlockingCopy,
     /// Operation for [`crate::raw::Access::blocking_rename`]
     BlockingRename,
     /// Operation for [`crate::raw::Access::blocking_stat`]
     BlockingStat,
+    /// Operation for [`crate::raw::Access::blocking_put_object_tagging`]
+    BlockingPutObjectTagging,
+    /// Operation for [`crate::raw::Access::blocking_get_object_tagging`]
+    BlockingGetObjectTagging,
     /// Operation for [`crate::raw::Access::blocking_delete`]
     BlockingDelete,
     /// Operation for [`crate::raw::oio::BlockingDelete::delete`]
     BlockingDeleterDelete,
     /// Operation for [`crate::raw::oio::BlockingDelete::flush`]
     BlockingDeleterFlush,
+    /// Operation for [`crate::raw::oio::BlockingDelete::deleted`]
+    BlockingDeleterDeleted,
     /// Operation for [`crate::raw::Access::blocking_list`]
     BlockingList,
     /// Operation for [`crate::raw::oio::BlockingList::next`]
@@ -128,11 +164,19 @@ impl From<Operation> for &'static str {
             Operation::ReaderRead => "Reader::read",
             Operation::Write => "write",
             Operation::WriterWrite => "Writer::write",
+            Operation::WriterWithOffset => "Writer::write_with_offset",
             Operation::WriterClose => "Writer::close",
             Operation::WriterAbort => "Writer::abort",
+            Operation::ObMultipartWrite => "ob_multipart_write",
+            Operation::ObMultipartWriterInitiatePart => "ObMultipartWriter::initiate_part",
+            Operation::ObMultiPartWriterWriteWithPartId => "ObMultipartWriter::write_with_part_id",
+            Operation::ObMultipartWriterClose => "ObMultipartWriter::close",
+            Operation::ObMultipartWriterAbort => "ObMultipartWriter::abort",
             Operation::Copy => "copy",
             Operation::Rename => "rename",
             Operation::Stat => "stat",
+            Operation::PutObjectTagging => "put_object_tagging",
+            Operation::GetObjectTagging => "get_object_tagging",
             Operation::Delete => "delete",
             Operation::List => "list",
             Operation::ListerNext => "List::next",
@@ -142,17 +186,27 @@ impl From<Operation> for &'static str {
             Operation::BlockingReaderRead => "BlockingReader::read",
             Operation::BlockingWrite => "blocking_write",
             Operation::BlockingWriterWrite => "BlockingWriter::write",
+            Operation::BlockingWriterWithOffset => "BlockingWriter::write_with_offset",
             Operation::BlockingWriterClose => "BlockingWriter::close",
+            Operation::BlockingObMultipartWrite => "blocking_ob_multipart_write",
+            Operation::BlockingObMultipartWriterInitiatePart => "BlockingObMultipartWriter::initiate_part",
+            Operation::BlockingObMultiPartWriterWriteWithPartId => "BlockingObMultipartWriter::write_with_part_id",
+            Operation::BlockingObMultipartWriterClose=> "BlockingObMultipartWriter::close",
+            Operation::BlockingObMultipartWriterAbort => "BlockingObMultipartWriter::abort",
             Operation::BlockingCopy => "blocking_copy",
             Operation::BlockingRename => "blocking_rename",
             Operation::BlockingStat => "blocking_stat",
+            Operation::BlockingPutObjectTagging => "blocking_put_object_tagging",
+            Operation::BlockingGetObjectTagging => "blocking_get_object_tagging",
             Operation::BlockingDelete => "blocking_delete",
             Operation::BlockingList => "blocking_list",
             Operation::BlockingListerNext => "BlockingLister::next",
             Operation::DeleterDelete => "Deleter::delete",
             Operation::DeleterFlush => "Deleter::flush",
+            Operation::DeleterDeleted => "Deleter::deleted",
             Operation::BlockingDeleterDelete => "BlockingDeleter::delete",
             Operation::BlockingDeleterFlush => "BlockingDeleter::flush",
+            Operation::BlockingDeleterDeleted => "BlockingDeleter::delted",
         }
     }
 }

@@ -17,11 +17,11 @@
 
 use std::sync::Arc;
 
-use super::core::S3Core;
+use super::core::{ListObjectsOutputV1, S3Core};
 use super::core::{ListObjectVersionsOutput, ListObjectsOutput};
 use super::error::parse_error;
 use crate::raw::oio::PageContext;
-use crate::raw::*;
+use crate::{raw::*, ErrorKind};
 use crate::EntryMode;
 use crate::Error;
 use crate::Metadata;
@@ -29,7 +29,7 @@ use crate::Result;
 use bytes::Buf;
 use quick_xml::de;
 
-pub type S3Listers = TwoWays<oio::PageLister<S3Lister>, oio::PageLister<S3ObjectVersionsLister>>;
+pub type S3Listers = TwoWays<oio::PageLister<S3ListerV1>, oio::PageLister<S3ObjectVersionsLister>>;
 
 pub struct S3Lister {
     core: Arc<S3Core>,
@@ -43,6 +43,7 @@ pub struct S3Lister {
 }
 
 impl S3Lister {
+    #[allow(dead_code)]
     pub fn new(
         core: Arc<S3Core>,
         path: &str,
@@ -143,6 +144,126 @@ impl oio::PageList for S3Lister {
     }
 }
 
+pub struct S3ListerV1 {
+    core: Arc<S3Core>,
+    path: String,
+    delimiter: &'static str,
+    limit: Option<usize>,
+    /// Amazon S3 starts listing **after** this specified key
+    start_after: Option<String>,
+}
+
+impl S3ListerV1 {
+    pub fn new(
+        core: Arc<S3Core>,
+        path: &str,
+        recursive: bool,
+        limit: Option<usize>,
+        start_after: Option<&str>, 
+    ) -> Self {
+        let delimiter = if recursive { "" } else { "/" };
+        Self {
+            core,
+            path: path.to_string(), 
+            delimiter,
+            limit,
+            start_after: start_after.map(String::from),
+        }
+    }
+}
+
+impl oio::PageList for S3ListerV1 {
+    async fn next_page(&self, ctx: &mut oio::PageContext) -> Result<()> {
+        let next_marker = if ctx.token.is_empty() {
+            match self.start_after {
+                Some(ref s) => &s,
+                None => &ctx.token,
+            }
+        } else {
+            &ctx.token
+        };
+        let resp = self
+            .core
+            .s3_list_objects_v1(
+                &self.path,
+                next_marker,
+                self.delimiter,
+                self.limit,
+            )
+            .await?;
+
+        if resp.status() != http::StatusCode::OK {
+            return Err(parse_error(resp));
+        }
+        let bs = resp.into_body();
+
+        let output: ListObjectsOutputV1 = de::from_reader(bs.reader())
+            .map_err(new_xml_deserialize_error)
+            // Allow S3 list to retry on XML deserialization errors.
+            //
+            // This is because the S3 list API may return incomplete XML data under high load.
+            // We are confident that our XML decoding logic is correct. When this error occurs,
+            // we allow retries to obtain the correct data.
+            .map_err(Error::set_temporary)?;
+
+         // Try our best to check whether this list is done.
+        //
+        // - Check `next_marker`
+        ctx.done = if let Some(is_truncated) = output.is_truncated {
+            !is_truncated
+        } else if let Some(next_marker) = output.next_marker.as_ref() {
+            next_marker.is_empty()
+        } else {
+            output.contents.is_empty() && output.common_prefixes.is_empty()
+        };
+
+        // NextMaker is returned only if you have the delimiter element.
+        // when build a Lister with recursive = true, the delimiter is set to empty.
+        // Therefore，we need to set ctx.token with the key of the last content.
+        // reference to: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html
+        ctx.token = String::new();
+        if self.delimiter.is_empty() {
+            if output.contents.len() > 0 {
+                ctx.token = output.contents.last().unwrap().key.clone();
+            }
+        } else if output.next_marker.is_some() {
+            ctx.token = output.next_marker.unwrap().clone();
+        } else if !ctx.done {
+            return Err(Error::new(ErrorKind::Unexpected, "When the list has not yet ended (done is false), next_marker is empty."))
+        }
+
+        for prefix in output.common_prefixes {
+            let de = oio::Entry::new(
+                &build_rel_path(&self.core.root, &prefix.prefix),
+                Metadata::new(EntryMode::DIR),
+            );
+
+            ctx.entries.push_back(de);
+        }
+
+        for object in output.contents {
+            let mut path = build_rel_path(&self.core.root, &object.key);
+            if path.is_empty() {
+                path = "/".to_string();
+            }
+
+            let mut meta = Metadata::new(EntryMode::from_path(&path)).with_content_length(object.size);
+
+            if let Some(etag) = &object.etag {
+                meta.set_etag(etag);
+                meta.set_content_md5(etag.trim_matches('"'));
+            }
+
+            meta.set_last_modified(parse_datetime_from_rfc3339(object.last_modified.as_str())?);
+
+            let de = oio::Entry::with(path, meta);
+            ctx.entries.push_back(de);
+        }
+
+        Ok(())
+        
+    }
+}
 // refer: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html
 pub struct S3ObjectVersionsLister {
     core: Arc<S3Core>,

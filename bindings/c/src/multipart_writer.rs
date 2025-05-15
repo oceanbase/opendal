@@ -1,0 +1,140 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+use ::opendal as core;
+use std::ffi::c_void;
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
+
+use super::*;
+
+/// \brief The result type returned by opendal's ob_multipart_writer operation.
+/// \note The opendal_multipart_writer actually owns a pointer to
+/// an opendal::BlockingObMultipartWriter, which is inside the Rust core code.
+#[repr(C)]
+pub struct opendal_multipart_writer {
+    /// The pointer to the opendal::BlockingObMultipartWriter in the Rust code.
+    /// Only touch this on judging whether it is NULL.
+    inner: *mut c_void,
+}
+
+impl opendal_multipart_writer {
+    fn deref_mut(&mut self) -> &mut core::BlockingObMultipartWriter {
+        // Safety: the inner should never be null once constructed
+        // The use-after-free is undefined behavior
+        unsafe { &mut *(self.inner as *mut core::BlockingObMultipartWriter) }
+    }
+}
+
+impl opendal_multipart_writer {
+    pub(crate) fn new(multipart_writer: core::BlockingObMultipartWriter) -> Self {
+        Self {
+            inner: Box::into_raw(Box::new(multipart_writer)) as _,
+        }
+    }
+
+    /// \brief Initiate the multipart writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_multipart_writer_initiate(
+        &mut self,
+    ) -> *mut opendal_error {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().initiate_part() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
+        }
+    }
+
+    /// \brief Write data with part id to the multipart writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_multipart_writer_write(
+        &mut self,
+        bytes: &opendal_bytes,
+        part_id: usize,
+    ) -> opendal_result_writer_write {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            let size = bytes.len;
+            // Similar to opendal_writer_write, it is necessary to copy byte here.
+            let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();
+            match self.deref_mut().write_with_part_id(copy_bytes, part_id) {
+                Ok(()) => opendal_result_writer_write {
+                    size,
+                    error: std::ptr::null_mut(),
+                },
+                Err(e) => opendal_result_writer_write {
+                    size: 0,
+                    error: opendal_error::new(e),
+                },
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => opendal_result_writer_write {
+                size: 0,
+                error,
+            }
+        }
+    }
+
+    /// \brief Abort the pending multipart writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_multipart_writer_abort(&mut self) -> *mut opendal_error {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().abort() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
+        }
+    }
+
+    /// \brief close the multipart writer.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_multipart_writer_close(&mut self) -> *mut opendal_error {
+        let ret = catch_unwind(AssertUnwindSafe(|| {
+            match self.deref_mut().close() {
+                Ok(_) => std::ptr::null_mut(),
+                Err(e) => opendal_error::new(e),
+            }
+        }));
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(error) => error,
+        }
+    }
+
+    /// \brief Frees the heap memory used by the opendal_multipart_writer.
+    /// \note This function make sure all data have been stored.
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_multipart_writer_free(ptr: *mut opendal_multipart_writer) {
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::BlockingObMultipartWriter));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
+    }
+}

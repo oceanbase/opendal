@@ -166,6 +166,8 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
     type BlockingReader = BlockingWrapper<A::Reader>;
     type Writer = A::Writer;
     type BlockingWriter = BlockingWrapper<A::Writer>;
+    type ObMultipartWriter = A::ObMultipartWriter;
+    type BlockingObMultipartWriter = BlockingWrapper<A::ObMultipartWriter>;
     type Lister = A::Lister;
     type BlockingLister = BlockingWrapper<A::Lister>;
     type Deleter = A::Deleter;
@@ -193,6 +195,10 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
         self.inner.write(path, args).await
     }
 
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner.ob_multipart_write(path, args).await
+    }
+
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
         self.inner.copy(from, to, args).await
     }
@@ -203,6 +209,21 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
 
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
         self.inner.stat(path, args).await
+    }
+
+    async fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.inner.put_object_tagging(path, args).await
+    }
+
+    async fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        self.inner.get_object_tagging(path).await
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
@@ -238,6 +259,14 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
         })
     }
 
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.handle.block_on(async {
+            let (rp, multipart_writer) = self.inner.ob_multipart_write(path, args).await?;
+            let blocking_ob_multipart_writer = Self::BlockingObMultipartWriter::new(self.handle.clone(), multipart_writer);
+            Ok((rp, blocking_ob_multipart_writer))
+        })
+    }
+
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
         self.handle.block_on(self.inner.copy(from, to, args))
     }
@@ -250,10 +279,25 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
         self.handle.block_on(self.inner.stat(path, args))
     }
 
+    fn blocking_put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        self.handle.block_on(self.inner.put_object_tagging(path, args))
+    }
+
+    fn blocking_get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        self.handle.block_on(self.inner.get_object_tagging(path))
+    }
+
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {
         self.handle.block_on(async {
-            let (rp, writer) = self.inner.delete().await?;
-            let blocking_deleter = Self::BlockingDeleter::new(self.handle.clone(), writer);
+            let (rp, deleter) = self.inner.delete().await?;
+            let blocking_deleter = Self::BlockingDeleter::new(self.handle.clone(), deleter);
             Ok((rp, blocking_deleter))
         })
     }
@@ -289,8 +333,34 @@ impl<I: oio::Write + 'static> oio::BlockingWrite for BlockingWrapper<I> {
         self.handle.block_on(self.inner.write(bs))
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        self.handle.block_on(self.inner.write_with_offset(offset, bs))
+    }
+
     fn close(&mut self) -> Result<()> {
         self.handle.block_on(self.inner.close())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.abort())
+    }
+}
+
+impl<I: oio::ObMultipartWrite + 'static> oio::BlockingObMultipartWrite for BlockingWrapper<I> {
+    fn initiate_part(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.initiate_part())
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+        self.handle.block_on(self.inner.write_with_part_id(bs, part_id))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.close())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        self.handle.block_on(self.inner.abort())
     }
 }
 
@@ -307,6 +377,10 @@ impl<I: oio::Delete + 'static> oio::BlockingDelete for BlockingWrapper<I> {
 
     fn flush(&mut self) -> Result<usize> {
         self.handle.block_on(self.inner.flush())
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        self.inner.deleted(path, args)
     }
 }
 

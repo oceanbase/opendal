@@ -37,7 +37,6 @@ pub(crate) struct S3Error {
 /// Parse error response into Error.
 pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, body) = resp.into_parts();
-
     let (mut kind, mut retryable) = match parts.status.as_u16() {
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
@@ -46,6 +45,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         // Client Disconnect, we should retry it.
         499 => (ErrorKind::Unexpected, true),
         500 | 502 | 503 | 504 => (ErrorKind::Unexpected, true),
+        110 => (ErrorKind::TimedOut, true),
         _ => (ErrorKind::Unexpected, false),
     };
 
@@ -54,7 +54,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         .unwrap_or_else(|_| (String::from_utf8_lossy(body.chunk()).into_owned(), None));
 
     if let Some(s3_err) = s3_err {
-        (kind, retryable) = parse_s3_error_code(s3_err.code.as_str()).unwrap_or((kind, retryable));
+        (kind, retryable) = parse_s3_error_code(s3_err.code.as_str(), s3_err.message.as_str()).unwrap_or((kind, retryable));
     }
 
     let mut err = Error::new(kind, message);
@@ -71,7 +71,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
 /// Util function to build [`Error`] from a [`S3Error`] object.
 pub(crate) fn from_s3_error(s3_error: S3Error, parts: Parts) -> Error {
     let (kind, retryable) =
-        parse_s3_error_code(s3_error.code.as_str()).unwrap_or((ErrorKind::Unexpected, false));
+        parse_s3_error_code(s3_error.code.as_str(), s3_error.message.as_str()).unwrap_or((ErrorKind::Unexpected, false));
     let mut err = Error::new(kind, format!("{s3_error:?}"));
 
     err = with_error_response_context(err, parts);
@@ -85,13 +85,29 @@ pub(crate) fn from_s3_error(s3_error: S3Error, parts: Parts) -> Error {
 
 /// Returns the `Error kind` of this code and whether the error is retryable.
 /// All possible error code: <https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#ErrorCodeList>
-pub fn parse_s3_error_code(code: &str) -> Option<(ErrorKind, bool)> {
+pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
+    // the msg might be useful in the future.
+    if msg.contains("region") && msg.contains("is wrong; expecting") {
+        return Some((ErrorKind::RegionMismatch, false))
+    }
+    if code == "InvalidRequest" && msg.contains("x-amz-checksum") {
+        return Some((ErrorKind::ChecksumError, false))
+    }
+    if code == "BadDigest" {
+        return Some((ErrorKind::ChecksumError, false))
+    }
+    // in virtual-hosted mode, Invalid Request is returned when use obdal to access
+    // cos with a wrong bucket name.
+    if code == "InvalidRequest" && msg.contains("<bucketname>-<appid>") {
+        return Some((ErrorKind::InvalidObjectStorageEndpoint, false))
+    }
     match code {
-        // > The specified bucket does not exist.
-        //
-        // Although the status code is 404, NoSuchBucket is
-        // a config invalid error, and it's not retryable from OpenDAL.
-        "NoSuchBucket" => Some((ErrorKind::ConfigInvalid, false)),
+        "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
+        "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
+        "KeyTooLongError" => Some((ErrorKind::ConfigInvalid, false)),
+        // when use obdal to access cos with a uri that exceeds
+        // the allowed length, an InvalidURI error is returnd.
+        "InvalidURI" => Some((ErrorKind::ConfigInvalid, false)),
         // > Your socket connection to the server was not read from
         // > or written to within the timeout period."
         //
@@ -112,6 +128,17 @@ pub fn parse_s3_error_code(code: &str) -> Option<(ErrorKind, bool)> {
         // indicates a temporary issue with the service or server, such as high load,
         // maintenance, or an internal problem.
         "ServiceUnavailable" => Some((ErrorKind::Unexpected, true)),
+        // > The specified bucket does not exist.
+        //
+        // Although the status code is 404, NoSuchBucket is
+        // a config invalid error, we redefine it into invalid object storage endpoint
+        // in oceanbase, and it's not retryable from OpenDAL.
+        "NoSuchBucket" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        "InvalidRegionName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        "InvalidRequest" => Some((ErrorKind::Unexpected, false)),
+        // for gcs batch delete
+        "NotImplemented" => Some((ErrorKind::Unsupported, false)),
         _ => None,
     }
 }

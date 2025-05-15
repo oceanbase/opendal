@@ -205,6 +205,8 @@ mod tests {
         type BlockingReader = ();
         type Writer = ();
         type BlockingWriter = ();
+        type ObMultipartWriter = ();
+        type BlockingObMultipartWriter = ();
         type Lister = ();
         type BlockingLister = MockLister;
         type Deleter = ();

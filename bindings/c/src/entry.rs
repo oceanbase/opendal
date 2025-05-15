@@ -17,15 +17,19 @@
 
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
+use std::panic::catch_unwind;
+use tracing::{error, warn};
 
 use ::opendal as core;
+use crate::{opendal_error, opendal_metadata};
+use super::*;
 
-/// \brief opendal_list_entry is the entry under a path, which is listed from the opendal_lister
+/// \brief opendal_entry is the entry under a path, which is listed from the opendal_lister
 ///
 /// For examples, please see the comment section of opendal_operator_list()
 /// @see opendal_operator_list()
-/// @see opendal_list_entry_path()
-/// @see opendal_list_entry_name()
+/// @see opendal_entry_path()
+/// @see opendal_entry_name()
 #[repr(C)]
 pub struct opendal_entry {
     /// The pointer to the opendal::Entry in the Rust code.
@@ -56,9 +60,24 @@ impl opendal_entry {
     /// \note To free the string, you can directly call free()
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_path(&self) -> *mut c_char {
-        let s = self.deref().path();
-        let c_str = CString::new(s).unwrap();
-        c_str.into_raw()
+        let ret = catch_unwind(|| {
+            let s = self.deref().path();
+            match CString::new(s) {
+                Ok(cstring) => cstring.into_raw(),
+                Err(_) => {
+                    warn!("fail to convert to CString, path: {:?}", s);
+                    std::ptr::null_mut()
+                }
+            }
+        });
+        match handle_result(ret) {
+            Ok(ret) => ret,
+            Err(err) => {
+                error!("opendal_entry_path error: {}", *err);
+                opendal_error::opendal_error_free(err);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Name of entry.
@@ -70,17 +89,51 @@ impl opendal_entry {
     /// \note To free the string, you can directly call free()
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_name(&self) -> *mut c_char {
-        let s = self.deref().name();
-        let c_str = CString::new(s).unwrap();
-        c_str.into_raw()
+        let ret = catch_unwind(|| {
+            let s = self.deref().name();
+            match CString::new(s) {
+                Ok(cstring) => cstring.into_raw(),
+                Err(_) => {
+                    warn!("fail to convert to CString, name: {:?}", s);
+                    std::ptr::null_mut()
+                }
+            }
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
+    }
+
+    /// \brief Metadata of entry.
+    ///
+    /// \note To free the metadata, you can directly call opendal_metadata_free()
+    #[no_mangle]
+    pub unsafe extern "C" fn opendal_entry_metadata(&self) -> *mut opendal_metadata {
+        let ret = catch_unwind(|| {
+            Box::into_raw(Box::new(opendal_metadata::new(self.deref().metadata().clone())))
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
     }
 
     /// \brief Frees the heap memory used by the opendal_list_entry
     #[no_mangle]
     pub unsafe extern "C" fn opendal_entry_free(ptr: *mut opendal_entry) {
-        if !ptr.is_null() {
-            drop(Box::from_raw((*ptr).inner as *mut core::Entry));
-            drop(Box::from_raw(ptr));
-        }
+        let ret = catch_unwind(|| {
+            if !ptr.is_null() {
+                drop(Box::from_raw((*ptr).inner as *mut core::Entry));
+                drop(Box::from_raw(ptr));
+            }
+        });
+        handle_result_without_ret(ret);
     }
 }

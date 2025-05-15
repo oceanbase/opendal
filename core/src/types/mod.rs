@@ -39,6 +39,12 @@ pub use write::*;
 mod blocking_write;
 pub use blocking_write::*;
 
+mod ob_multipart_write;
+pub use ob_multipart_write::*;
+
+mod blocking_ob_multipart_write;
+pub use blocking_ob_multipart_write::*;
+
 mod list;
 pub use list::BlockingLister;
 pub use list::Lister;

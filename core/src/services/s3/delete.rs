@@ -99,7 +99,7 @@ impl oio::BatchDelete for S3Deleter {
 
 fn parse_delete_objects_result_error(err: DeleteObjectsResultError) -> Error {
     let (kind, retryable) =
-        parse_s3_error_code(err.code.as_str()).unwrap_or((ErrorKind::Unexpected, false));
+        parse_s3_error_code(err.code.as_str(), err.message.as_str()).unwrap_or((ErrorKind::Unexpected, false));
     let mut err: Error = Error::new(kind, format!("{err:?}"));
     if retryable {
         err = err.set_temporary();

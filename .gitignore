@@ -1,7 +1,7 @@
 # IDE and editor
-.vscode
 .idea
-
+.vscode
+!.vscode/settings.json
 **/target
 **/vendor
 dist/
@@ -20,3 +20,10 @@ perf.*
 
 # Python cache files
 **/__pycache__/
+
+rpm/**
+!rpm/obdal-build.sh
+!rpm/obdal.spec
+
+
+**/.ccls-cache/**
