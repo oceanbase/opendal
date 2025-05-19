@@ -63,7 +63,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, mut body) = resp.into_parts();
     let bs = body.copy_to_bytes(body.remaining());
 
-    let (kind, retryable) = match parts.status {
+    let (mut kind, mut retryable) = match parts.status {
         StatusCode::NOT_FOUND => (ErrorKind::NotFound, false),
         StatusCode::FORBIDDEN => (ErrorKind::PermissionDenied, false),
         StatusCode::PRECONDITION_FAILED | StatusCode::NOT_MODIFIED | StatusCode::CONFLICT => {
@@ -76,10 +76,13 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         _ => (ErrorKind::Unexpected, false),
     };
 
-    let mut message = match de::from_reader::<_, AzblobError>(bs.clone().reader()) {
-        Ok(azblob_err) => format!("{azblob_err:?}"),
-        Err(_) => String::from_utf8_lossy(&bs).into_owned(),
-    };
+    let (mut message, azblob_error) = de::from_reader::<_, AzblobError>(bs.clone().reader())
+        .map(|azblob_error| (format!("{azblob_error:?}"), Some(azblob_error)))
+        .unwrap_or_else(|_| (String::from_utf8_lossy(&bs).into_owned(), None));
+
+    if let Some(azblob_error) = azblob_error {
+        (kind, retryable) = parse_azblob_error_code(azblob_error.code.as_str(), azblob_error.message.as_str()).unwrap_or((kind, retryable));
+    }
 
     // If there is no body here, fill with error code.
     if message.is_empty() {
@@ -105,6 +108,24 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     }
 
     err
+}
+
+pub fn parse_azblob_error_code(code: &str, message: &str) -> Option<(ErrorKind, bool)> {
+    match code {
+        "AppendPositionConditionNotMet" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
+        "OutOfRangeInput" => {
+            if message.contains("The specified resource name length is not within the permissible limits") {
+                Some((ErrorKind::InvalidObjectStorageEndpoint, false))
+            } else if message.contains("One of the request inputs is out of range.") {
+                Some((ErrorKind::ConfigInvalid, false))
+            } else {
+                None
+            }
+        },
+        "InvalidResourceName" 
+        | "ContainerNotFound" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

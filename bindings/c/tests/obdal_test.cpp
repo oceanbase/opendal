@@ -115,6 +115,7 @@ TEST_F(ObDalTest, test_tagging)
   // test when tagging is not exist
   {
     opendal_result_get_object_tagging result = opendal_operator_get_object_tagging(op_, path.c_str());
+    dump_error(result.error);
     ASSERT_TRUE(result.error == nullptr);
     ASSERT_TRUE(result.tagging != nullptr);
 
@@ -176,44 +177,50 @@ TEST_F(ObDalTest, test_list)
   {
     // recursive = true
     opendal_result_list l = opendal_operator_list(op_, path.c_str(), 1, true/*recursive*/, (path + "a").c_str());
-    ASSERT_TRUE(l.error == nullptr);
-    ASSERT_TRUE(l.lister != nullptr);
-    opendal_lister *lister = l.lister;
+    if (type_ == AZBLOB) {
+      ASSERT_TRUE(l.error != nullptr);
+      ASSERT_TRUE(l.error->code == OPENDAL_UNSUPPORTED);
+    } else {
+      ASSERT_TRUE(l.error == nullptr);
+      ASSERT_TRUE(l.lister != nullptr);
+      opendal_lister *lister = l.lister;
 
-    opendal_entry *entry = nullptr;
+      opendal_entry *entry = nullptr;
 
-    // first should be testpath/b
-    opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
-    ASSERT_TRUE(r_lister_next.error == nullptr);
-    ASSERT_TRUE(r_lister_next.entry != nullptr);
-    entry = r_lister_next.entry;
-    char *entry_path = opendal_entry_path(entry); 
-    ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
-    opendal_c_char_free(entry_path);
-    // check file length
-    opendal_metadata *meta = opendal_entry_metadata(entry);
-    ASSERT_TRUE(meta != nullptr);
-    ASSERT_TRUE(data.len == opendal_metadata_content_length(meta));
-    opendal_metadata_free(meta);
-    opendal_entry_free(entry);
-    entry = nullptr;
+      // first should be testpath/b
+      opendal_result_lister_next r_lister_next = opendal_lister_next(lister);
+      dump_error(r_lister_next.error);
+      ASSERT_TRUE(r_lister_next.error == nullptr);
+      ASSERT_TRUE(r_lister_next.entry != nullptr);
+      entry = r_lister_next.entry;
+      char *entry_path = opendal_entry_path(entry); 
+      ASSERT_TRUE(0 == strcmp((path + "b").c_str(), entry_path));
+      opendal_c_char_free(entry_path);
+      // check file length
+      opendal_metadata *meta = opendal_entry_metadata(entry);
+      ASSERT_TRUE(meta != nullptr);
+      ASSERT_TRUE(data.len == opendal_metadata_content_length(meta));
+      opendal_metadata_free(meta);
+      opendal_entry_free(entry);
+      entry = nullptr;
 
-    // second should be testpath/c/d
-    r_lister_next = opendal_lister_next(lister);
-    ASSERT_TRUE(r_lister_next.error == nullptr);
-    ASSERT_TRUE(r_lister_next.entry != nullptr);
-    entry = r_lister_next.entry;
-    entry_path = opendal_entry_path(entry);
-    ASSERT_TRUE(0 == strcmp((path + "c/b").c_str(), entry_path));
-    opendal_c_char_free(entry_path);
-    opendal_entry_free(entry);
-    entry = nullptr;
+      // second should be testpath/c/d
+      r_lister_next = opendal_lister_next(lister);
+      ASSERT_TRUE(r_lister_next.error == nullptr);
+      ASSERT_TRUE(r_lister_next.entry != nullptr);
+      entry = r_lister_next.entry;
+      entry_path = opendal_entry_path(entry);
+      ASSERT_TRUE(0 == strcmp((path + "c/b").c_str(), entry_path));
+      opendal_c_char_free(entry_path);
+      opendal_entry_free(entry);
+      entry = nullptr;
 
-    // end
-    r_lister_next = opendal_lister_next(lister);
-    ASSERT_TRUE(r_lister_next.error == nullptr);
-    ASSERT_TRUE(r_lister_next.entry == nullptr);
-    opendal_lister_free(lister);
+      // end
+      r_lister_next = opendal_lister_next(lister);
+      ASSERT_TRUE(r_lister_next.error == nullptr);
+      ASSERT_TRUE(r_lister_next.entry == nullptr);
+      opendal_lister_free(lister);
+    } 
   }
 
   {
@@ -327,21 +334,30 @@ TEST_F(ObDalTest, test_wrong_endpoint)
   std::string test_wrong_endpoint = "aa." + std::string(endpoint);
   opendal_operator_options *options = opendal_operator_options_new();
 
-  if (strcmp(scheme, "s3") == 0) {
-      opendal_operator_options_set(options, "bucket", bucket);
-      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-      opendal_operator_options_set(options, "region", region);
-      opendal_operator_options_set(options, "access_key_id", access_key_id);
-      opendal_operator_options_set(options, "secret_access_key", secret_access_key);
-      opendal_operator_options_set(options, "disable_config_load", "true");
-      opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-      opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-    } else if (strcmp(scheme, "oss") == 0) {
-      opendal_operator_options_set(options, "bucket", bucket);
-      opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-      opendal_operator_options_set(options, "access_key_id", access_key_id);
-      opendal_operator_options_set(options, "access_key_secret", secret_access_key);
-    }
+  if (type_ == S3) {
+    opendal_operator_options_set(options, "bucket", bucket);
+    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "region", region);
+    opendal_operator_options_set(options, "access_key_id", access_key_id);
+    opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+    opendal_operator_options_set(options, "disable_config_load", "true");
+    opendal_operator_options_set(options, "disable_ec2_metadata", "true");
+    opendal_operator_options_set(options, "enable_virtual_host_style", "true");
+  } else if (type_ == OSS) {
+    opendal_operator_options_set(options, "bucket", bucket);
+    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "access_key_id", access_key_id);
+    opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+  } else if (type_ == AZBLOB) {
+    opendal_operator_options_set(options, "container", bucket);
+    test_wrong_endpoint = std::string(endpoint);
+    int pos = test_wrong_endpoint.find("://") + 3;
+    ASSERT_TRUE(pos < test_wrong_endpoint.length());
+    test_wrong_endpoint = test_wrong_endpoint.substr(0, pos) + "aa." + test_wrong_endpoint.substr(pos);
+    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "account_name", access_key_id);
+    opendal_operator_options_set(options, "account_key", secret_access_key);
+  }
 
   opendal_result_operator_new tmp_result = opendal_operator_new(scheme, options);
   dump_error(tmp_result.error);
@@ -557,6 +573,7 @@ TEST_F(ObDalTest, test_multipart)
     ASSERT_FALSE(result_writer_write.error);
     ASSERT_EQ(result_writer_write.size, data_size);
     opendal_error *error = opendal_writer_close(writer);
+    dump_error(error);
     ASSERT_FALSE(error);
     opendal_writer_free(writer);
 
@@ -710,7 +727,7 @@ TEST_F(ObDalTest, test_ob_multipart)
 
 TEST_F(ObDalTest, test_append_writer)
 {
-  if (strcmp(scheme, "oss") != 0) {
+  if (type_ != OSS && type_ != AZBLOB) {
     return;
   }
   std::string path = base_path_ + "append_file";

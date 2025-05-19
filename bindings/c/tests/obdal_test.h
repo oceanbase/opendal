@@ -36,8 +36,8 @@ class ObDalTest : public ::testing::Test
 public:
   ObDalTest()
     : op_(nullptr),
-      ob_span_(nullptr)
-  
+      ob_span_(nullptr),
+      type_(MAX_TYPE)
   {
     base_path_ = "obdal_test_" + get_formatted_time() + "/";
   }
@@ -50,7 +50,9 @@ protected:
     ob_span_ = ob_span;
 
     opendal_operator_options *options = opendal_operator_options_new();
-    if (strcmp(scheme, "s3") == 0) {
+    type_ = get_storage_type(scheme);
+    ASSERT_NE(MAX_TYPE, type_);
+    if (type_ == S3) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);
       opendal_operator_options_set(options, "region", region);
@@ -59,13 +61,21 @@ protected:
       opendal_operator_options_set(options, "disable_config_load", "true");
       opendal_operator_options_set(options, "disable_ec2_metadata", "true");
       opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-    } else if (strcmp(scheme, "oss") == 0) {
+      opendal_operator_options_set(options, "checksum_algorithm", "md5");
+    } else if (type_ == OSS) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);
       opendal_operator_options_set(options, "access_key_id", access_key_id);
       opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+      opendal_operator_options_set(options, "checksum_algorithm", "md5");
+    } else if (type_ == AZBLOB) {
+      opendal_operator_options_set(options, "container", bucket);
+      opendal_operator_options_set(options, "endpoint", endpoint);
+      opendal_operator_options_set(options, "account_name", access_key_id);
+      opendal_operator_options_set(options, "account_key", secret_access_key);
+      opendal_operator_options_set(options, "timeout", "120");
+      opendal_operator_options_set(options, "checksum_algorithm", "md5");
     }
-    opendal_operator_options_set(options, "checksum_algorithm", "md5");
     
     // Given A new OpenDAL Blocking Operator
     opendal_result_operator_new result = opendal_operator_new(scheme, options);
@@ -94,7 +104,7 @@ protected:
                                             reinterpret_cast<void *>(ob_log_handler),
                                             6,  // LevelFilter::TRACE,
                                             32, // thread count 
-                                            97, // max client count
+                                            32, // max client count
                                             30); // max idle time of client (unit s)
     ASSERT_EQ(error, nullptr);
   }
@@ -107,6 +117,7 @@ protected:
   std::string base_path_;
   const opendal_operator *op_;
   ObSpan *ob_span_;
+  StorageType type_;
 };
 
 #endif

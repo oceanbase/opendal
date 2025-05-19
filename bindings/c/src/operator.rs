@@ -393,7 +393,7 @@ fn build_operator(
         .unwrap_or(60);
 
     // TODO 简化代码，由于个别 service 没有 http_client 方法，无法直接基于 `Operator::via_iter` 函数修改
-    // 若需要简化，可新建一个包含 http_clietn 的 trait，并为 oss 和 s3 impl，然后用一个智能指针去接实现了该 trait 的 builder
+    // 若需要简化，可新建一个包含 http_client 的 trait，并为 oss 和 s3 impl，然后用一个智能指针去接实现了该 trait 的 builder
     let mut op = match schema {
         core::Scheme::S3 => {
             let mut builder: core::services::S3 =
@@ -410,6 +410,18 @@ fn build_operator(
         core::Scheme::Oss => {
             let mut builder: core::services::Oss =
                 core::services::OssConfig::from_iter(map)?.into_builder();
+            let http_client = HTTP_CLIENT.read().map_err(|_| {
+                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+            })?;
+            if let Some(client) = http_client.as_ref() {
+                builder = builder.http_client(client.clone());
+            }
+            let acc = builder.build()?;
+            core::OperatorBuilder::new(acc).finish()
+        }
+        core::Scheme::Azblob => {
+            let mut builder: core::services::Azblob = 
+                core::services::AzblobConfig::from_iter(map)?.into_builder();
             let http_client = HTTP_CLIENT.read().map_err(|_| {
                 core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
             })?;

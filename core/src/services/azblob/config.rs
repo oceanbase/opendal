@@ -60,6 +60,12 @@ pub struct AzblobConfig {
 
     /// The maximum batch operations of Azblob service backend.
     pub batch_max_operations: Option<usize>,
+
+    /// Checksum Algorithm to use when sending checksums in HTTP headers.
+    ///
+    /// Available options:
+    /// - "md5"
+    pub checksum_algorithm: Option<String>,
 }
 
 impl Debug for AzblobConfig {

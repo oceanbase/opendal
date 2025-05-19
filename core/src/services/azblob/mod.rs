@@ -25,6 +25,8 @@ mod error;
 mod lister;
 #[cfg(feature = "services-azblob")]
 mod writer;
+#[cfg(feature = "services-azblob")]
+mod multipart_writer;
 
 #[cfg(feature = "services-azblob")]
 mod backend;

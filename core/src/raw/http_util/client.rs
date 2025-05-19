@@ -29,6 +29,7 @@ use http::Request;
 use http::Response;
 use once_cell::sync::Lazy;
 use raw::oio::Read;
+use reqwest;
 
 use super::parse_content_encoding;
 use super::parse_content_length;
@@ -160,12 +161,19 @@ impl HttpFetch for reqwest::Client {
             }
         }
 
-        let mut resp = req_builder.send().await.map_err(|err| {
-            Error::new(ErrorKind::Unexpected, "send http request")
-                .with_operation("http_util::Client::send")
-                .with_context("url", uri.to_string())
-                .with_temporary(is_temporary_error(&err))
-                .set_source(err)
+        let mut resp = req_builder.send().await.map_err(|err: reqwest::Error| {
+            if is_invalid_endpoint(&err) {
+                return Error::new(ErrorKind::InvalidObjectStorageEndpoint, "send http request")
+                    .with_operation("http_util::Client::send")
+                    .with_context("reqwest error", format!("{err:?}"))
+                    .set_source(err)
+            } else {
+                return Error::new(ErrorKind::Unexpected, "send http request")
+                    .with_operation("http_util::Client::send")
+                    .with_context("reqwest error", format!("{err:?}"))
+                    .with_temporary(is_temporary_error(&err))
+                    .set_source(err)
+            }
         })?;
 
         // Get content length from header so that we can check it.
@@ -200,7 +208,7 @@ impl HttpFetch for reqwest::Client {
                 .map_err(move |err| {
                     Error::new(ErrorKind::Unexpected, "read data from http response")
                         .with_operation("http_util::Client::send")
-                        .with_context("url", uri.to_string())
+                        .with_context("reqwest error", format!("{err:?}"))
                         .with_temporary(is_temporary_error(&err))
                         .set_source(err)
                 }),
@@ -220,4 +228,9 @@ fn is_temporary_error(err: &reqwest::Error) -> bool {
     err.is_body() ||
     // error decoding response body, for example, connection reset.
     err.is_decode()
+}
+
+#[inline]
+fn is_invalid_endpoint(err: &reqwest::Error) -> bool {
+    err.is_request() && format!("{err:?}").contains("Name or service not known")
 }

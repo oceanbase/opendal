@@ -108,7 +108,7 @@ if (USE_GTEST)
     # target_link_libraries(tests opendal_c_shared gtest_main)
 
     add_executable(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
-    target_link_libraries(obdal_test PRIVATE opendal_c_static gtest gmock -lpthread -ldl)
+    target_link_libraries(obdal_test PRIVATE opendal_c_shared gtest gmock -lpthread -ldl)
     target_link_libraries(obdal_test PRIVATE ${stdcxx_shared})
     target_link_options(obdal_test PRIVATE -rdynamic)
     message(STATUS "Linking with: ${stdcxx_shared}")
