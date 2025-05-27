@@ -18,6 +18,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use uuid::Uuid;
 use futures::select;
 use futures::Future;
 use futures::FutureExt;
@@ -115,6 +116,8 @@ pub struct MultipartPart {
     pub etag: String,
     /// The checksum of the part.
     pub checksum: Option<String>,
+    /// The block_id of the part, for azblob
+    pub block_id: Option<Uuid>,
 }
 
 struct WriteInput<W: MultipartWrite> {
@@ -449,6 +452,7 @@ mod tests {
                 part_number,
                 etag: "etag".to_string(),
                 checksum: None,
+                block_id: None,
             })
         }
 

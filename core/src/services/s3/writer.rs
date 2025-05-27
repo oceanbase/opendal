@@ -156,6 +156,7 @@ impl oio::MultipartWrite for S3Writer {
                     part_number,
                     etag,
                     checksum,
+                    block_id: None,
                 })
             }
             _ => Err(parse_error(resp)),

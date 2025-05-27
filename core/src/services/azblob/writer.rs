@@ -89,6 +89,21 @@ impl oio::AppendWrite for AzblobWriter {
     }
 
     async fn append(&self, offset: u64, size: u64, body: Buffer) -> Result<()> {
+        if offset == 0 {
+            match self.offset().await {
+                Ok(real_offset) => {
+                    if real_offset != offset {
+                        return Err(Error::new(
+                            ErrorKind::PwriteOffsetNotMatch,
+                            "the blob is existed and the offset didn't match",
+                        )
+                        .with_context("real offset", real_offset)
+                        .with_context("given offset", offset));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
         let mut req = self
             .core
             .azblob_append_blob_request(&self.path, offset, size, body)?;

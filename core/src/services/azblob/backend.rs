@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use bytes::Buf;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use http::Response;
@@ -28,16 +29,19 @@ use log::debug;
 use reqsign::AzureStorageConfig;
 use reqsign::AzureStorageLoader;
 use reqsign::AzureStorageSigner;
+use services::azblob::core::ChecksumAlgorithm;
 use sha2::Digest;
 use sha2::Sha256;
 
 use super::core::constants::X_MS_META_PREFIX;
 use super::core::AzblobCore;
+use super::core::Tags;
 use super::delete::AzblobDeleter;
 use super::error::parse_error;
 use super::lister::AzblobLister;
 use super::writer::AzblobWriter;
 use super::writer::AzblobWriters;
+use super::multipart_writer::AzblobMultipartWriter;
 use crate::raw::*;
 use crate::services::AzblobConfig;
 use crate::*;
@@ -220,6 +224,16 @@ impl AzblobBuilder {
         self.config.encryption_key = Some(BASE64_STANDARD.encode(key));
         self.config.encryption_key_sha256 =
             Some(BASE64_STANDARD.encode(Sha256::digest(key).as_slice()));
+        self
+    }
+
+    /// set checksum Algorithm 
+    ///
+    /// Available options:
+    /// - "md5"
+    pub fn checksum_algorithm(mut self, checksum_algorithm: &str) -> Self {
+        self.config.checksum_algorithm = Some(checksum_algorithm.to_string());
+
         self
     }
 
@@ -428,6 +442,17 @@ impl Builder for AzblobBuilder {
             }
         };
 
+        let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {
+            Some("md5") => Some(ChecksumAlgorithm::Md5),
+            None => None,
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::ConfigInvalid,
+                    "checksum_algorithm value must be md5",
+                ));
+            }
+        };
+
         let cred_loader = AzureStorageLoader::new(config_loader);
 
         let signer = AzureStorageSigner::new();
@@ -439,6 +464,7 @@ impl Builder for AzblobBuilder {
                 encryption_key,
                 encryption_key_sha256,
                 encryption_algorithm,
+                checksum_algorithm,
                 container: self.config.container.clone(),
 
                 client,
@@ -484,7 +510,7 @@ pub struct AzblobBackend {
 impl Access for AzblobBackend {
     type Reader = HttpBody;
     type Writer = AzblobWriters;
-    type ObMultipartWriter = ();
+    type ObMultipartWriter = oio::MultipartWriter<AzblobMultipartWriter>;
     type Lister = oio::PageLister<AzblobLister>;
     type Deleter = oio::BatchDeleter<AzblobDeleter>;
     type BlockingReader = ();
@@ -561,6 +587,42 @@ impl Access for AzblobBackend {
         }
     }
 
+    async fn put_object_tagging(
+        &self, 
+        path: &str, 
+        args: OpPutObjTag
+    ) -> Result<RpPutObjTag> {
+        let resp = self.core.azblob_put_object_tagging(path, args).await?;
+
+        let status = resp.status();
+
+        match status {
+            StatusCode::NO_CONTENT => {
+                Ok(RpPutObjTag::default())
+            }
+            _ => Err(parse_error(resp)),
+        }
+    }
+
+    async fn get_object_tagging(
+        &self,
+        path: &str
+    ) -> Result<RpGetObjTag> {
+        let resp = self.core.azblob_get_object_tagging(path).await?;
+        
+        let status = resp.status();
+
+        match status {
+            StatusCode::OK => {
+                let body = resp.body();
+                let tagging: Tags = quick_xml::de::from_reader(body.clone().reader()).map_err(new_xml_deserialize_error)?;
+                
+                Ok(tagging.into())
+            }
+            _ => Err(parse_error(resp))
+        }
+    }
+
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
         let resp = self.core.azblob_get_blob(path, args.range(), &args).await?;
 
@@ -590,6 +652,18 @@ impl Access for AzblobBackend {
         Ok((RpWrite::default(), w))
     }
 
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let concurrent = args.concurrent();
+        let executor = args.executor().cloned();
+        let writer = AzblobMultipartWriter::new(self.core.clone(), args, path.to_string());
+        let w = oio::MultipartWriter::new(writer, executor, concurrent);
+        Ok((RpWrite::default(), w))
+    }
+
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
         Ok((
             RpDelete::default(),
@@ -598,6 +672,12 @@ impl Access for AzblobBackend {
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
+        if args.start_after().is_some() && args.start_after().unwrap().len() != 0 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "start_after is not supported in azblob",
+            ));
+        }
         let l = AzblobLister::new(
             self.core.clone(),
             path.to_string(),

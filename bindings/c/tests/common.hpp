@@ -38,6 +38,29 @@ static constexpr char endpoint[] = "xxx";
 static constexpr char bucket[] = "xxx";
 static constexpr char access_key_id[] = "xxx";
 static constexpr char secret_access_key[] = "xxx";
+enum StorageType
+{
+  AZBLOB,
+  S3,
+  OSS,
+  MAX_TYPE,
+};
+
+StorageType get_storage_type(const char *scheme)
+{
+  if (scheme == nullptr) {
+    return MAX_TYPE;
+  } else if (strcmp(scheme, "azblob") == 0) {
+    return AZBLOB;
+  } else if (strcmp(scheme, "s3") == 0) {
+    return S3;
+  } else if (strcmp(scheme, "oss") == 0) {
+    return OSS;
+  } else {
+    return MAX_TYPE;
+  }
+}
+
 extern "C" void ob_log_handler(const char *level, const char *message) 
 {
   // std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;

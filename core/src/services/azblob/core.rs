@@ -17,6 +17,7 @@
 
 use std::fmt;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::time::Duration;
@@ -39,6 +40,7 @@ use reqsign::AzureStorageSigner;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
+use md5::{Digest, Md5};
 
 use crate::raw::*;
 use crate::*;
@@ -58,6 +60,83 @@ pub mod constants {
     pub const X_MS_ENCRYPTION_ALGORITHM: &str = "x-ms-encryption-algorithm";
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tag {
+    // #[serde(rename = "Key")]
+    pub key: String,
+    // #[serde(rename = "Value")]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagSet {
+    pub tag: Option<Vec<Tag>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tags {
+    pub tag_set: TagSet,
+}
+
+impl Into<RpGetObjTag> for Tags {
+    fn into(self) -> RpGetObjTag {
+        match self.tag_set.tag {
+            Some(tag) => RpGetObjTag::new().with_tag_set(
+                tag.iter()
+                    .map(|item| (item.key.to_string(), item.value.to_string()))
+                    .collect(),
+            ),
+            None => RpGetObjTag::new(),
+        }
+    }
+}
+
+impl From<OpPutObjTag> for Tags {
+    fn from(op: OpPutObjTag) -> Self {
+        let tag: Vec<Tag> = op
+            .tag_set()
+            .iter()
+            .map(|(k, v)| Tag {
+                key: k.to_string(),
+                value: v.to_string(),
+            })
+            .collect();
+
+        Tags {
+            tag_set: TagSet { tag: Some(tag) },
+        }
+    }
+}
+
+#[derive(PartialEq)]
+#[derive(Debug)]
+pub enum ChecksumAlgorithm {
+    Md5,
+}
+
+impl ChecksumAlgorithm {
+    pub fn to_header_name(&self) -> HeaderName {
+        match self {
+            Self::Md5 => HeaderName::try_from("Content-MD5").expect("Invalid header name for Md5"),
+        }
+    }
+}
+
+impl Display for ChecksumAlgorithm {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Md5 => "MD5",
+            }
+        )
+    }
+}
+
 pub struct AzblobCore {
     pub container: String,
     pub root: String,
@@ -66,6 +145,7 @@ pub struct AzblobCore {
     pub encryption_key_sha256: Option<HeaderValue>,
     pub encryption_algorithm: Option<HeaderValue>,
     pub client: HttpClient,
+    pub checksum_algorithm: Option<ChecksumAlgorithm>,
     pub loader: AzureStorageLoader,
     pub signer: AzureStorageSigner,
 }
@@ -280,10 +360,50 @@ impl AzblobCore {
             }
         }
 
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            req = self.insert_checksum_header(req, &checksum);
+        }
+
         // Set body
         let req = req.body(body).map_err(new_request_build_error)?;
 
         Ok(req)
+    }
+
+    // return HTTP 204 is ok
+    // https://learn.microsoft.com/en-us/rest/api/storageservices/set-blob-tags?tabs=microsoft-entra-id#status-code
+    pub async fn azblob_put_object_tagging(
+        &self,
+        path: &str,
+        args: OpPutObjTag,
+    ) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let url = format!("{}/{}/{}?comp=tags", self.endpoint, self.container, percent_encode_path(&p));
+        
+        let tagging: Tags = args.into();
+        let content = quick_xml::se::to_string(&tagging).map_err(new_xml_deserialize_error)?;
+        let mut req = Request::put(&url);
+
+        req = req.header(CONTENT_TYPE, "application/xml; charset=UTF-8");
+        req = req.header(CONTENT_LENGTH, content.len());
+
+        let mut req = req.body(Buffer::from(Bytes::from(content))).map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+        
+        self.send(req).await
+    }
+
+    pub async fn azblob_get_object_tagging(&self, path: &str) -> Result<Response<Buffer>> {
+        let p = build_abs_path(&self.root, path);
+        let url = format!("{}/{}/{}?comp=tags", self.endpoint, self.container, percent_encode_path(&p));
+
+        let mut req = Request::get(&url)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
     }
 
     /// For appendable object, it could be created by `put` an empty blob
@@ -379,6 +499,10 @@ impl AzblobCore {
 
         req = req.header(constants::X_MS_BLOB_CONDITION_APPENDPOS, position);
 
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            req = self.insert_checksum_header(req, &checksum);
+        }
+
         let req = req.body(body).map_err(new_request_build_error)?;
 
         Ok(req)
@@ -418,6 +542,9 @@ impl AzblobCore {
 
         if let Some(ty) = args.content_type() {
             req = req.header(CONTENT_TYPE, ty)
+        }
+        if let Some(checksum) = self.calculate_checksum(&body) {
+            req = self.insert_checksum_header(req, &checksum);
         }
         // Set body
         let req = req.body(body).map_err(new_request_build_error)?;
@@ -641,6 +768,28 @@ impl AzblobCore {
 
         self.sign(&mut req).await?;
         self.send(req).await
+    }
+
+    pub fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
+        match self.checksum_algorithm {
+            None => None,
+            Some(ChecksumAlgorithm::Md5) => {
+                let mut hasher = Md5::new();
+                body.clone().for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest))
+            }
+        }
+    }
+    pub fn insert_checksum_header(
+        &self,
+        mut req: http::request::Builder,
+        checksum: &str,
+    ) -> http::request::Builder {
+        if let Some(checksum_algorithm) = self.checksum_algorithm.as_ref() {
+            req = req.header(checksum_algorithm.to_header_name(), checksum);
+        }
+        req
     }
 }
 

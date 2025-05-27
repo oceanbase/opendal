@@ -46,7 +46,7 @@ opendal = { version = ">=0", path = "../../core", features = [
   "layers-blocking",
   "layers-tracing",
   # These are default features before v0.46. TODO: change to optional features #4313
-  # "services-azblob",
+  "services-azblob",
   # "services-cos",
   # "services-fs",
   # "services-gcs",

@@ -67,36 +67,36 @@ impl<A: Access> LayeredAccess for TypeEraseAccessor<A> {
     }
 
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
-        self.inner
-            .read(path, args)
+        Box::pin(self.inner
+            .read(path, args))
             .await
             .map(|(rp, r)| (rp, Box::new(r) as oio::Reader))
     }
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
-        self.inner
-            .write(path, args)
+        Box::pin(self.inner
+            .write(path, args))
             .await
             .map(|(rp, w)| (rp, Box::new(w) as oio::Writer))
     }
 
     async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
-        self.inner
-            .ob_multipart_write(path, args)
+        Box::pin(self.inner
+            .ob_multipart_write(path, args))
             .await
             .map(|(rp, w)| (rp, Box::new(w) as oio::ObMultipartWriter))
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
-        self.inner
-            .delete()
+        Box::pin(self.inner
+            .delete())
             .await
             .map(|(rp, p)| (rp, Box::new(p) as oio::Deleter))
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
-        self.inner
-            .list(path, args)
+        Box::pin(self.inner
+            .list(path, args))
             .await
             .map(|(rp, p)| (rp, Box::new(p) as oio::Lister))
     }

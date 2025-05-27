@@ -462,6 +462,7 @@ mod tests {
     use tokio::time::sleep;
     use tokio::time::timeout;
 
+    use crate::layers::RetryLayer;
     use crate::layers::TimeoutLayer;
     use crate::layers::TypeEraseLayer;
     use crate::raw::*;
@@ -599,5 +600,24 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Unexpected);
         assert!(err.to_string().contains("timeout"));
+    }
+
+    #[tokio::test]
+    async fn test_timeout_wrapper_retry() {
+        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as Accessor;
+        let op = Operator::from_inner(acc)
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_secs(1)))
+            .layer(RetryLayer::new().with_max_times(4))
+            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_secs(7)));
+            
+
+        let reader = op.reader("test").await.unwrap();
+
+        let res = reader.read(0..4).await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        println!("{err:?}");
+        assert_eq!(err.kind(), ErrorKind::TimedOut);
+        assert!(err.to_string().contains("timeout"))
     }
 }
