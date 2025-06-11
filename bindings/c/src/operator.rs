@@ -305,8 +305,10 @@ pub extern "C" fn opendal_fin_env() {
 
     unsafe  {
         OB_LOG_HANDLER = None;
-        ALLOC_FN = None;
-        FREE_FN = None;
+        // Even after the tokio runtime is dropped, some TLS (Thread Local Storage) variables 
+        // are only released when the thread exits, preventing malloc and free from being unlinked.
+        // ALLOC_FN = None;
+        // FREE_FN = None;
     }
 }
 
