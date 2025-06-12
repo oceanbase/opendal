@@ -69,17 +69,20 @@ extern "C" void ob_log_handler(const char *level, const char *message)
   out.close();
 }
 
+
+// in order to simulate the memory allocation in ob, we
+// allocate more 16 bytes each time
 void *my_alloc(size_t size, size_t align) 
 {
-    void *ptr = malloc(size);
+    void *ptr = malloc(size + 16);
     // printf("my_alloc %zu %p\n", size, ptr);
-    return ptr;
+    return (char *)ptr + 16;
 }
 
 void my_free(void *ptr) 
 {
     // printf("my_free %p\n", ptr);
-    free(ptr);
+    free((char *)ptr - 16);
 }
 
 // compare opendal_bytes with c_char *

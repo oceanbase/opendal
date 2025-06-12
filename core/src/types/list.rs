@@ -60,10 +60,11 @@ impl Stream for Lister {
     type Item = Result<Entry>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Returns `None` if we have errored.
-        if self.errored {
-            return Poll::Ready(None);
-        }
+        // When a retryable error is returned, oceanbase might retry 'lister.next', 
+        // so returning None directly here is not advisable.
+        // if self.errored {
+        //     return Poll::Ready(None);
+        // }
 
         if let Some(mut lister) = self.lister.take() {
             let fut = async move {
@@ -128,10 +129,11 @@ impl Iterator for BlockingLister {
     type Item = Result<Entry>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Returns `None` if we have errored.
-        if self.errored {
-            return None;
-        }
+        // When a retryable error is returned, oceanbase might retry 'lister.next', 
+        // so returning None directly here is not advisable.
+        // if self.errored {
+        //     return None;
+        // }
 
         match self.lister.next() {
             Ok(Some(entry)) => Some(Ok(entry.into_entry())),
