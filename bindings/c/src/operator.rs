@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use md5::{Md5, Digest};
+use opendal::Buffer;
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -612,6 +615,88 @@ pub unsafe extern "C" fn opendal_operator_write(
         };
 
         match op.deref().write(path, bytes) {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+/// write if match
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_write_with_if_match(
+    op: &opendal_operator,
+    path: *const c_char,
+    bytes: &opendal_bytes,
+) -> *mut opendal_error {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        let mut hasher = Md5::new();
+        hasher.update(Buffer::from(bytes).to_bytes());
+        let etag = format!("\"{:x}\"", hasher.finalize());
+
+        match op.deref().write_with(path, bytes).if_match(&etag).call() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+/// write if none match
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_write_with_if_none_match(
+    op: &opendal_operator,
+    path: *const c_char,
+    bytes: &opendal_bytes
+) -> *mut opendal_error {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        match op.deref().write_with(path, bytes).if_none_match("*").call() {
+            Ok(_) => std::ptr::null_mut(),
+            Err(e) => opendal_error::new(e),
+        }
+    });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => error,
+    }
+}
+
+/// write if not exists
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_write_with_if_not_exists(
+    op: &opendal_operator,
+    path: *const c_char,
+    bytes: &opendal_bytes
+) -> *mut opendal_error {
+    let ret = catch_unwind(|| {
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        match op.deref().write_with(path, bytes).if_not_exists(true).call() {
             Ok(_) => std::ptr::null_mut(),
             Err(e) => opendal_error::new(e),
         }
