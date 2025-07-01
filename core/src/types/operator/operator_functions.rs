@@ -134,6 +134,28 @@ impl FunctionWrite {
         self
     }
 
+    /// Set the If-Match for this operation.
+    pub fn if_match(mut self, s: &str) -> Self {
+        self.0 = self.0.map_args(|(args, options, bs)| (args.with_if_match(s), options, bs));
+        self
+    }
+
+    /// Set the If-None-Match for this operation.
+    pub fn if_none_match(mut self, s: &str) -> Self {
+        self.0 = self
+            .0
+            .map_args(|(args, options, bs)| (args.with_if_none_match(s), options, bs));
+        self
+    }
+
+    /// Set the If-Not-Exists for this operation.
+    pub fn if_not_exists(mut self, b: bool) -> Self {
+        self.0 = self
+            .0
+            .map_args(|(args, options, bs)| (args.with_if_not_exists(b), options, bs));
+        self
+    }
+
     /// Call the function to consume all the input and generate a
     /// result.
     pub fn call(self) -> Result<()> {

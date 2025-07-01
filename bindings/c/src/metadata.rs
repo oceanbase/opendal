@@ -16,7 +16,9 @@
 // under the License.
 
 use ::opendal as core;
-use std::ffi::c_void;
+use tracing::warn;
+use std::os::raw::c_char;
+use std::ffi::{c_void, CString};
 use std::panic::catch_unwind;
 
 use crate::handle_result_without_ret;
@@ -113,6 +115,42 @@ impl opendal_metadata {
             Err(err) => {
                 dump_panic(err);
                 false
+            }
+        }
+    }
+
+    /// \brief Return the etag of the metadata
+    ///
+    /// # Example
+    /// ```C
+    /// // ... previously you wrote "Hello, World!" to path "/testpath"
+    /// opendal_result_stat s = opendal_operator_stat(op, "/testpath");
+    /// assert(s.error == NULL);
+    ///
+    /// opendal_metadata *meta = s.meta;
+    /// assert(opendal_metadata_etag(meta) != NULL);
+    /// ```
+    #[no_mangle]
+    pub extern "C" fn opendal_metadata_etag(&self) -> *mut c_char {
+        let ret = catch_unwind(|| {
+            match self.deref().etag() {
+                Some(etag) => {
+                    match CString::new(etag) {
+                        Ok(cstring) => cstring.into_raw(),
+                        Err(_) => {
+                            warn!("fail to convert to CString, name: {:?}", etag);
+                            std::ptr::null_mut()
+                        }
+                    }
+                }
+                None => std::ptr::null_mut()
+            }
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
             }
         }
     }

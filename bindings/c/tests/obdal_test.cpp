@@ -793,6 +793,90 @@ TEST_F(ObDalTest, test_append_writer)
   free(data_str);
 }
 
+// This case is skipped because s3 and minio behave inconsistently
+TEST_F(ObDalTest, test_write_with_if_match)
+{
+  if (type_ == S3 && false) {
+    std::string path = base_path_ + "write_with_if_match";
+    opendal_bytes data = {
+      .data = (uint8_t*)"this_string_length_is_24",
+      .len = 24,
+    };
+    opendal_error *error = nullptr;
+    // error = opendal_operator_write(op_, path.c_str(), &data);
+    // ASSERT_EQ(nullptr, error);
+
+    // error = opendal_operator_write(op_, path.c_str(), &data);
+    // ASSERT_EQ(nullptr, error);
+
+    // opendal_result_stat stat = opendal_operator_stat(op_, path.c_str());
+    // ASSERT_EQ(nullptr, stat.error);
+
+    // char *etag = opendal_metadata_etag(stat.meta);
+    // std::cout << etag << std::endl;
+
+    error = opendal_operator_write_with_if_match(op_, path.c_str(), &data);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+
+    opendal_bytes data2 = {
+      .data = (uint8_t*)"thit_string_length_is_24",
+      .len = 24,
+    }; 
+
+    error = opendal_operator_write_with_if_match(op_, path.c_str(), &data2);
+    dump_error(error);
+    ASSERT_TRUE(error != nullptr);
+    free_error(error);
+    // opendal_c_char_free(etag);
+  }
+}
+
+// This case is skipped because s3 and minio behave inconsistently
+TEST_F(ObDalTest, test_write_with_if_none_match)
+{
+  if (type_ == S3 && false) {
+    std::string path = base_path_ + "write_with_if_none_match";
+    opendal_bytes data = {
+      .data = (uint8_t*)"this_string_length_is_24",
+      .len = 24,
+    };
+    opendal_error *error = nullptr;
+    error = opendal_operator_write_with_if_none_match(op_, path.c_str(), &data);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+
+    opendal_bytes data2 = {
+      .data = (uint8_t*)"this_string_length_is_25",
+      .len = 24,
+    }; 
+
+    error = opendal_operator_write_with_if_none_match(op_, path.c_str(), &data2);
+    dump_error(error);
+    ASSERT_NE(nullptr, error);
+    free_error(error);
+  }
+}
+
+TEST_F(ObDalTest, test_write_with_if_not_exists)
+{
+  std::string path = base_path_ + "write_with_if_not_exists";
+  opendal_bytes data = {
+    .data = (uint8_t*)"this_string_length_is_24",
+    .len = 24,
+  };
+  opendal_error *error = nullptr;
+  error = opendal_operator_write_with_if_not_exists(op_, path.c_str(), &data);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  error = opendal_operator_write_with_if_not_exists(op_, path.c_str(), &data);
+  dump_error(error);
+  ASSERT_NE(nullptr, error);
+  ASSERT_EQ(OPENDAL_CONDITION_NOT_MATCH, error->code);
+  free_error(error);
+}
+
 TEST_F(ObDalTest, test_catch_panic)
 {
   opendal_error *error = opendal_panic_test();
@@ -813,6 +897,7 @@ TEST_F(ObDalTest, test_catch_panic)
 
   opendal_c_char_free(nullptr);
 }
+
 
 
 

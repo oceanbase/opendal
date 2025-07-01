@@ -484,6 +484,10 @@ impl S3Core {
             req = req.header(IF_NONE_MATCH, "*");
         }
 
+        if let Some(if_none_match) = args.if_none_match() {
+            req = req.header(IF_NONE_MATCH, if_none_match);
+        }
+
         // Set storage class header
         if let Some(v) = &self.default_storage_class {
             req = req.header(HeaderName::from_static(constants::X_AMZ_STORAGE_CLASS), v);

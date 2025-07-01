@@ -843,6 +843,21 @@ uint64_t opendal_metadata_content_length(const struct opendal_metadata *self);
 bool opendal_metadata_is_file(const struct opendal_metadata *self);
 
 /**
+ * \brief Return the etag of the metadata
+ *
+ * # Example
+ * ```C
+ * // ... previously you wrote "Hello, World!" to path "/testpath"
+ * opendal_result_stat s = opendal_operator_stat(op, "/testpath");
+ * assert(s.error == NULL);
+ *
+ * opendal_metadata *meta = s.meta;
+ * assert(opendal_metadata_etag(meta) != NULL);
+ * ```
+ */
+char *opendal_metadata_etag(const struct opendal_metadata *self);
+
+/**
  * \brief Return whether the path represents a directory
  *
  * # Example
@@ -1018,6 +1033,27 @@ struct opendal_result_operator_new opendal_operator_new(const char *scheme,
 struct opendal_error *opendal_operator_write(const struct opendal_operator *op,
                                              const char *path,
                                              const struct opendal_bytes *bytes);
+
+/**
+ * write if match
+ */
+struct opendal_error *opendal_operator_write_with_if_match(const struct opendal_operator *op,
+                                                           const char *path,
+                                                           const struct opendal_bytes *bytes);
+
+/**
+ * write if none match
+ */
+struct opendal_error *opendal_operator_write_with_if_none_match(const struct opendal_operator *op,
+                                                                const char *path,
+                                                                const struct opendal_bytes *bytes);
+
+/**
+ * write if not exists
+ */
+struct opendal_error *opendal_operator_write_with_if_not_exists(const struct opendal_operator *op,
+                                                                const char *path,
+                                                                const struct opendal_bytes *bytes);
 
 /**
  * \brief Blocking read the data from `path`.
