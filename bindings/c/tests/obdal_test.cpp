@@ -30,7 +30,8 @@ TEST_F(ObDalTest, test_multi_init)
       6,  // LevelFilter::TRACE,
       32, // thread count 
       97, // max client count
-      30); // max idle time of client (unit s) 
+      30,
+      10); // max idle time of client (unit s) 
   dump_error(error);
   ASSERT_EQ(nullptr, error);
 }

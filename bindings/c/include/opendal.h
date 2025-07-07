@@ -914,7 +914,8 @@ struct opendal_error *opendal_init_env(void *alloc,
                                        uint32_t log_level,
                                        uintptr_t thread_cnt,
                                        uintptr_t pool_max_idle_per_host,
-                                       uint64_t pool_max_idle_time_s);
+                                       uint64_t pool_max_idle_time_s,
+                                       uint64_t connect_timeout_s);
 
 /**
  * \brief fin opendal environment

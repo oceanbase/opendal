@@ -27,3 +27,4 @@ rpm/**
 
 
 **/.ccls-cache/**
+**/.cache/** 

@@ -105,7 +105,8 @@ protected:
                                             6,  // LevelFilter::TRACE,
                                             32, // thread count 
                                             32, // max client count
-                                            30); // max idle time of client (unit s)
+                                            30,
+                                            10); // max idle time of client (unit s)
     ASSERT_EQ(error, nullptr);
   }
 

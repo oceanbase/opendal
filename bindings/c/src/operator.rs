@@ -177,6 +177,7 @@ pub extern "C" fn opendal_init_env(
     thread_cnt: usize,
     pool_max_idle_per_host: usize,
     pool_max_idle_time_s: u64,
+    connect_timeout_s: u64,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
         if alloc.is_null() || free.is_null() {
@@ -213,6 +214,7 @@ pub extern "C" fn opendal_init_env(
         let client = reqwest::Client::builder()
                 .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
                 .pool_max_idle_per_host(pool_max_idle_per_host)
+                .connect_timeout(Duration::from_secs(connect_timeout_s))
                 .build();
         match client {
             Ok(client) => {

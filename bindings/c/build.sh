@@ -2,7 +2,7 @@
 
 REDHAT=$(grep -Po '(?<=release )\d' /etc/redhat-release)
 ID=$(grep -Po '(?<=^ID=).*' /etc/os-release | tr -d '"')
-DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/el/"
+DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/el"
 CUR_DIR=$(dirname $(readlink -f "$0"))
 
 # 安装依赖
@@ -21,7 +21,7 @@ if [[ "${ID}"x != "alinux"x ]]; then
     do
         TEMP=$(mktemp -p "/" -u ".XXXX")
         deps_url=${DOWNLOAD_BASE_URL}/${REDHAT}/${ARCH}
-        pkg=${dep}${REDHAT}.${ARCH}.rpm
+        pkg=${dep}.el${REDHAT}.${ARCH}.rpm
         wget $deps_url/$pkg -O $PKG_DIR/$TEMP
         if [[ $? == 0 ]]; then
             mv -f $PKG_DIR/$TEMP $PKG_DIR/$pkg 
@@ -29,6 +29,28 @@ if [[ "${ID}"x != "alinux"x ]]; then
         (cd $TARGET_DIR_3rd && rpm2cpio $PKG_DIR/$pkg | cpio -di -u --quiet)
     done
 
+    export PATH=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin:$PATH
+    export CC=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/gcc
+    export CXX=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/g++
+elif [[ "${REDHAT}"x == "3"x ]]; then
+    REDHAT=8
+    DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/al"
+    dep_pkgs=(
+        obdevtools-cmake-3.22.1-142025032516
+        obdevtools-gcc9-9.3.0-152024092711
+        devdeps-gtest-1.8.0-192024092714
+    )
+    for dep in ${dep_pkgs[@]}
+    do
+        TEMP=$(mktemp -p "/" -u ".XXXX")
+        deps_url=${DOWNLOAD_BASE_URL}/${REDHAT}/${ARCH}
+        pkg=${dep}.al${REDHAT}.${ARCH}.rpm
+        wget $deps_url/$pkg -O $PKG_DIR/$TEMP
+        if [[ $? == 0 ]]; then
+            mv -f $PKG_DIR/$TEMP $PKG_DIR/$pkg 
+        fi
+        (cd $TARGET_DIR_3rd && rpm2cpio $PKG_DIR/$pkg | cpio -di -u --quiet)
+    done
     export PATH=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin:$PATH
     export CC=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/gcc
     export CXX=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/g++
