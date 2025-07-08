@@ -22,7 +22,7 @@ use std::ffi::{c_void, CString};
 use std::panic::catch_unwind;
 
 use crate::handle_result_without_ret;
-use crate::operator::dump_panic;
+use crate::common::dump_panic;
 
 /// \brief Carries all metadata associated with a **path**.
 ///

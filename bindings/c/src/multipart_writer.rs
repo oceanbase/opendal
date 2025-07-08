@@ -21,6 +21,7 @@ use std::panic::catch_unwind;
 use std::panic::AssertUnwindSafe;
 
 use super::*;
+use common::THREAD_TENANT_ID;
 
 /// \brief The result type returned by opendal's ob_multipart_writer operation.
 /// \note The opendal_multipart_writer actually owns a pointer to
@@ -30,6 +31,7 @@ pub struct opendal_multipart_writer {
     /// The pointer to the opendal::BlockingObMultipartWriter in the Rust code.
     /// Only touch this on judging whether it is NULL.
     inner: *mut c_void,
+    tenant_id: u64,
 }
 
 impl opendal_multipart_writer {
@@ -41,9 +43,10 @@ impl opendal_multipart_writer {
 }
 
 impl opendal_multipart_writer {
-    pub(crate) fn new(multipart_writer: core::BlockingObMultipartWriter) -> Self {
+    pub(crate) fn new(multipart_writer: core::BlockingObMultipartWriter, tenant_id: u64) -> Self {
         Self {
             inner: Box::into_raw(Box::new(multipart_writer)) as _,
+            tenant_id,
         }
     }
 
@@ -72,6 +75,7 @@ impl opendal_multipart_writer {
         part_id: usize,
     ) -> opendal_result_writer_write {
         let ret = catch_unwind(AssertUnwindSafe(|| {
+            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
             let size = bytes.len;
             // Similar to opendal_writer_write, it is necessary to copy byte here.
             let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();

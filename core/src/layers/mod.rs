@@ -43,6 +43,8 @@ pub use timeout::TimeoutLayer;
 mod blocking;
 #[cfg(feature = "layers-blocking")]
 pub use blocking::BlockingLayer;
+pub use blocking::DEFAULT_TENANT_ID;
+pub use blocking::TENANT_ID;
 
 #[cfg(feature = "layers-chaos")]
 mod chaos;

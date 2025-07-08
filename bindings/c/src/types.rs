@@ -19,7 +19,6 @@ use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
 use std::panic::catch_unwind;
 use std::panic::AssertUnwindSafe;
-use operator::dump_panic;
 use tracing::{span, span::EnteredSpan, Level};
 
 use super::*;
