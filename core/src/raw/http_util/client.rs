@@ -167,6 +167,12 @@ impl HttpFetch for reqwest::Client {
                     .with_operation("http_util::Client::send")
                     .with_context("reqwest error", format!("{err:?}"))
                     .set_source(err)
+            } else if is_timeout(&err) {
+                return Error::new(ErrorKind::TimedOut, "send http request")
+                    .with_operation("http_util::Client::send")
+                    .with_context("reqwest error", format!("{err:?}"))
+                    .with_temporary(is_temporary_error(&err))
+                    .set_source(err)
             } else {
                 return Error::new(ErrorKind::Unexpected, "send http request")
                     .with_operation("http_util::Client::send")
@@ -233,4 +239,9 @@ fn is_temporary_error(err: &reqwest::Error) -> bool {
 #[inline]
 fn is_invalid_endpoint(err: &reqwest::Error) -> bool {
     err.is_request() && format!("{err:?}").contains("Name or service not known")
+}
+
+#[inline]
+fn is_timeout(err: &reqwest::Error) -> bool {
+    err.is_timeout()
 }
