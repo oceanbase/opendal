@@ -33,7 +33,7 @@ OpenDAL supports the following storage [services](https://docs.rs/opendal/latest
 | File Storage Services          | fs [alluxio] [azdls] [azfile] [chainsafe] [compfs] <br> [dbfs] [gridfs] [hdfs] [hdfs_native] [ipfs] [webhdfs]                            |
 | Consumer Cloud Storage Service | [aliyun_drive] [gdrive] [onedrive] [dropbox] [icloud] [koofr] <br> [pcloud] [seafile] [yandex_disk]                                      |
 | Key-Value Storage Services     | [cacache] [cloudflare_kv] [dashmap] memory [etcd] <br> [foundationdb] [persy] [redis] [rocksdb] [sled] <br> [redb] [tikv] [atomicserver] |
-| Database Storage Services      | [d1] [mongodb] [mysql] [postgresql] [sqlite] [surrealdb]                                                                                 |
+| Database Storage Services      | [d1] [mongodb] [mysql] [postgresql] [sqlite]                                                                                  |
 | Cache Storage Services         | [ghac] [memcached] [mini_moka] [moka] [vercel_artifacts]                                                                                 |
 | Git Based Storage Services     | [huggingface]                                                                                                                            |
 
@@ -91,7 +91,6 @@ OpenDAL supports the following storage [services](https://docs.rs/opendal/latest
 [mysql]: https://www.mysql.com/
 [postgresql]: https://www.postgresql.org/
 [sqlite]: https://www.sqlite.org/
-[surrealdb]: https://surrealdb.com/
 
 [ghac]: https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
 [memcached]: https://memcached.org/

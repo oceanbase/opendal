@@ -545,8 +545,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * feat(services/sled): add SledConfig by @yufan022 in https://github.com/apache/opendal/pull/4351
 * feat : Implementing config for part of services by @AnuRage-git in https://github.com/apache/opendal/pull/4344
 * feat(bindings/java): explicit async runtime  by @tisonkun in https://github.com/apache/opendal/pull/4376
-* feat(services/surrealdb): support surrealdb service by @yufan022 in https://github.com/apache/opendal/pull/4375
-* feat(bindings/java): avoid double dispose NativeObject by @tisonkun in https://github.com/apache/opendal/pull/4377
 * feat : Implement config for services/foundationdb by @AnuRage-git in https://github.com/apache/opendal/pull/4355
 * feat: add ofs ctrl-c exit unmount hook by @oowl in https://github.com/apache/opendal/pull/4393
 * feat: Implement RFC-4382 Range Based Read by @Xuanwo in https://github.com/apache/opendal/pull/4381
