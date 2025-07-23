@@ -41,6 +41,8 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
         304 | 412 => (ErrorKind::ConditionNotMatch, false),
+        // OSS/OBS/GCS may return 429 error for too many requests.
+        429 => (ErrorKind::RateLimited, true),
         // Service like R2 could return 499 error with a message like:
         // Client Disconnect, we should retry it.
         499 => (ErrorKind::Unexpected, true),
@@ -139,8 +141,6 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
         "InvalidRequest" => Some((ErrorKind::Unexpected, false)),
         // for gcs batch delete
         "NotImplemented" => Some((ErrorKind::Unsupported, false)),
-        // OSS may return QpsLimitExceeded error
-        "QpsLimitExceeded" => Some((ErrorKind::RateLimited, true)),
         _ => None,
     }
 }
