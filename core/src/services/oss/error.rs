@@ -84,6 +84,7 @@ pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> 
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         "PositionNotEqualToLength" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
+        "QpsLimitExceeded" => Some((ErrorKind::RateLimited, true)),
         _ => None,
     }
 }

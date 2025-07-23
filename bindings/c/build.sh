@@ -21,7 +21,7 @@ if [[ "${ID}"x != "alinux"x ]]; then
     do
         TEMP=$(mktemp -p "/" -u ".XXXX")
         deps_url=${DOWNLOAD_BASE_URL}/${REDHAT}/${ARCH}
-        pkg=${dep}.el${REDHAT}.${ARCH}.rpm
+        pkg=${dep}${REDHAT}.${ARCH}.rpm
         wget $deps_url/$pkg -O $PKG_DIR/$TEMP
         if [[ $? == 0 ]]; then
             mv -f $PKG_DIR/$TEMP $PKG_DIR/$pkg 

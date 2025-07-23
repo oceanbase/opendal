@@ -139,6 +139,8 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
         "InvalidRequest" => Some((ErrorKind::Unexpected, false)),
         // for gcs batch delete
         "NotImplemented" => Some((ErrorKind::Unsupported, false)),
+        // OSS may return QpsLimitExceeded error
+        "QpsLimitExceeded" => Some((ErrorKind::RateLimited, true)),
         _ => None,
     }
 }
