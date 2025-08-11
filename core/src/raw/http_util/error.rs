@@ -31,7 +31,7 @@ pub fn new_request_build_error(err: http::Error) -> Error {
 /// Create a new error happened during signing request.
 pub fn new_request_credential_error(err: anyhow::Error) -> Error {
     Error::new(
-        ErrorKind::Unexpected,
+        ErrorKind::PermissionDenied,
         "loading credential to sign http request",
     )
     .set_temporary()
@@ -41,7 +41,7 @@ pub fn new_request_credential_error(err: anyhow::Error) -> Error {
 
 /// Create a new error happened during signing request.
 pub fn new_request_sign_error(err: anyhow::Error) -> Error {
-    Error::new(ErrorKind::Unexpected, "signing http request")
+    Error::new(ErrorKind::PermissionDenied, "signing http request")
         .with_operation("reqsign::Sign")
         .set_source(err)
 }
