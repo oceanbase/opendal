@@ -30,6 +30,12 @@
 //!
 //! For examples, you may see the examples subdirectory
 
+mod common;
+pub use common::c_char_to_str;
+pub use common::handle_result;
+pub use common::handle_result_without_ret;
+pub use common::dump_panic;
+
 mod error;
 pub use error::opendal_code;
 pub use error::opendal_error;
@@ -45,10 +51,6 @@ pub use metadata::opendal_metadata;
 
 mod operator;
 pub use operator::opendal_operator;
-pub use operator::c_char_to_str;
-pub use operator::handle_result;
-pub use operator::handle_result_without_ret;
-pub use operator::dump_panic;
 
 mod operator_info;
 

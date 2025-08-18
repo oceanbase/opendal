@@ -22,6 +22,7 @@ use std::panic::AssertUnwindSafe;
 use ::opendal as core;
 
 use super::*;
+use common::THREAD_TENANT_ID;
 
 /// \brief The result type returned by opendal's reader operation.
 ///
@@ -32,6 +33,7 @@ pub struct opendal_reader {
     /// The pointer to the opendal::BlockingReader in the Rust code.
     /// Only touch this on judging whether it is NULL.
     inner: *mut c_void,
+    tenant_id: u64,
 }
 
 impl opendal_reader {
@@ -43,9 +45,10 @@ impl opendal_reader {
 }
 
 impl opendal_reader {
-    pub(crate) fn new(reader: core::BlockingReader) -> Self {
+    pub(crate) fn new(reader: core::BlockingReader, tenant_id: u64) -> Self {
         Self {
             inner: Box::into_raw(Box::new(reader)) as _,
+            tenant_id,
         }
     }
 
@@ -58,6 +61,8 @@ impl opendal_reader {
         offset: usize,
     ) -> opendal_result_reader_read {
         let ret = catch_unwind(AssertUnwindSafe(|| {
+            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
+
             if buf.is_null() || len == 0 {
                 return opendal_result_reader_read {
                     size: 0,

@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use tokio::runtime::Handle;
+use tokio::task_local;
 
 use crate::raw::*;
 use crate::*;
@@ -130,14 +131,25 @@ use crate::*;
 #[derive(Debug, Clone)]
 pub struct BlockingLayer {
     handle: Handle,
+    tenant_id: u64,
+}
+
+/// 500 is the default tenant id for oceanbase
+pub const DEFAULT_TENANT_ID: u64 = 500;
+
+task_local! {
+    /// tls variable for oceanbase malloc
+    /// oceanbase malloc will use this to get the tenant id
+    pub static TENANT_ID: u64;
 }
 
 impl BlockingLayer {
     /// Create a new `BlockingLayer` with the current runtime's handle
-    pub fn create() -> Result<Self> {
+    pub fn create(tenant_id: Option<u64>) -> Result<Self> {
         Ok(Self {
             handle: Handle::try_current()
                 .map_err(|_| Error::new(ErrorKind::Unexpected, "failed to get current handle"))?,
+            tenant_id: tenant_id.unwrap_or(DEFAULT_TENANT_ID),
         })
     }
 }
@@ -149,6 +161,7 @@ impl<A: Access> Layer<A> for BlockingLayer {
         BlockingAccessor {
             inner,
             handle: self.handle.clone(),
+            tenant_id: self.tenant_id,
         }
     }
 }
@@ -158,6 +171,7 @@ pub struct BlockingAccessor<A: Access> {
     inner: A,
 
     handle: Handle,
+    tenant_id: u64,
 }
 
 impl<A: Access> LayeredAccess for BlockingAccessor<A> {
@@ -184,129 +198,204 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
     }
 
     async fn create_dir(&self, path: &str, args: OpCreateDir) -> Result<RpCreateDir> {
-        self.inner.create_dir(path, args).await
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.create_dir(path, args).await
+            })
+            .await
     }
 
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
-        self.inner.read(path, args).await
+        TENANT_ID
+            .scope(
+                self.tenant_id,
+                async move { self.inner.read(path, args).await },
+            )
+            .await
     }
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
-        self.inner.write(path, args).await
+        TENANT_ID
+            .scope(
+                self.tenant_id,
+                async move { self.inner.write(path, args).await },
+            )
+            .await
     }
 
-    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
-        self.inner.ob_multipart_write(path, args).await
+    async fn ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.ob_multipart_write(path, args).await
+            })
+            .await
     }
 
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
-        self.inner.copy(from, to, args).await
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.copy(from, to, args).await
+            })
+            .await
     }
 
     async fn rename(&self, from: &str, to: &str, args: OpRename) -> Result<RpRename> {
-        self.inner.rename(from, to, args).await
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.rename(from, to, args).await
+            })
+            .await
     }
 
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        self.inner.stat(path, args).await
+        TENANT_ID
+            .scope(
+                self.tenant_id,
+                async move { self.inner.stat(path, args).await },
+            )
+            .await
     }
 
-    async fn put_object_tagging(
-        &self, 
-        path: &str, 
-        args: OpPutObjTag
-    ) -> Result<RpPutObjTag> {
-        self.inner.put_object_tagging(path, args).await
+    async fn put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.put_object_tagging(path, args).await
+            })
+            .await
     }
 
-    async fn get_object_tagging(
-        &self,
-        path: &str
-    ) -> Result<RpGetObjTag> {
-        self.inner.get_object_tagging(path).await
+    async fn get_object_tagging(&self, path: &str) -> Result<RpGetObjTag> {
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.get_object_tagging(path).await
+            })
+            .await
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
-        self.inner.delete().await
+        TENANT_ID
+            .scope(self.tenant_id, async move { self.inner.delete().await })
+            .await
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
-        self.inner.list(path, args).await
+        TENANT_ID
+            .scope(
+                self.tenant_id,
+                async move { self.inner.list(path, args).await },
+            )
+            .await
     }
 
     async fn presign(&self, path: &str, args: OpPresign) -> Result<RpPresign> {
-        self.inner.presign(path, args).await
+        TENANT_ID
+            .scope(self.tenant_id, async move {
+                self.inner.presign(path, args).await
+            })
+            .await
     }
 
     fn blocking_create_dir(&self, path: &str, args: OpCreateDir) -> Result<RpCreateDir> {
-        self.handle.block_on(self.inner.create_dir(path, args))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.create_dir(path, args))
+        })
     }
 
     fn blocking_read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::BlockingReader)> {
-        self.handle.block_on(async {
-            let (rp, reader) = self.inner.read(path, args).await?;
-            let blocking_reader = Self::BlockingReader::new(self.handle.clone(), reader);
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(async {
+                let (rp, reader) = self.inner.read(path, args).await?;
+                let blocking_reader =
+                    Self::BlockingReader::new(self.handle.clone(), reader, self.tenant_id);
 
-            Ok((rp, blocking_reader))
+                Ok((rp, blocking_reader))
+            })
         })
     }
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
-        self.handle.block_on(async {
-            let (rp, writer) = self.inner.write(path, args).await?;
-            let blocking_writer = Self::BlockingWriter::new(self.handle.clone(), writer);
-            Ok((rp, blocking_writer))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(async {
+                let (rp, writer) = self.inner.write(path, args).await?;
+                let blocking_writer =
+                    Self::BlockingWriter::new(self.handle.clone(), writer, self.tenant_id);
+                Ok((rp, blocking_writer))
+            })
         })
     }
 
-    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
-        self.handle.block_on(async {
-            let (rp, multipart_writer) = self.inner.ob_multipart_write(path, args).await?;
-            let blocking_ob_multipart_writer = Self::BlockingObMultipartWriter::new(self.handle.clone(), multipart_writer);
-            Ok((rp, blocking_ob_multipart_writer))
+    fn blocking_ob_multipart_write(
+        &self,
+        path: &str,
+        args: OpWrite,
+    ) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(async {
+                let (rp, multipart_writer) = self.inner.ob_multipart_write(path, args).await?;
+                let blocking_ob_multipart_writer = Self::BlockingObMultipartWriter::new(
+                    self.handle.clone(),
+                    multipart_writer,
+                    self.tenant_id,
+                );
+                Ok((rp, blocking_ob_multipart_writer))
+            })
         })
     }
 
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
-        self.handle.block_on(self.inner.copy(from, to, args))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.copy(from, to, args))
+        })
     }
 
     fn blocking_rename(&self, from: &str, to: &str, args: OpRename) -> Result<RpRename> {
-        self.handle.block_on(self.inner.rename(from, to, args))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.rename(from, to, args))
+        })
     }
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
-        self.handle.block_on(self.inner.stat(path, args))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.stat(path, args))
+        })
     }
 
-    fn blocking_put_object_tagging(
-        &self, 
-        path: &str, 
-        args: OpPutObjTag
-    ) -> Result<RpPutObjTag> {
-        self.handle.block_on(self.inner.put_object_tagging(path, args))
+    fn blocking_put_object_tagging(&self, path: &str, args: OpPutObjTag) -> Result<RpPutObjTag> {
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle
+                .block_on(self.inner.put_object_tagging(path, args))
+        })
     }
 
-    fn blocking_get_object_tagging(
-        &self,
-        path: &str
-    ) -> Result<RpGetObjTag> {
-        self.handle.block_on(self.inner.get_object_tagging(path))
+    fn blocking_get_object_tagging(&self, path: &str) -> Result<RpGetObjTag> {
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.get_object_tagging(path))
+        })
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {
-        self.handle.block_on(async {
-            let (rp, deleter) = self.inner.delete().await?;
-            let blocking_deleter = Self::BlockingDeleter::new(self.handle.clone(), deleter);
-            Ok((rp, blocking_deleter))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(async {
+                let (rp, deleter) = self.inner.delete().await?;
+                let blocking_deleter =
+                    Self::BlockingDeleter::new(self.handle.clone(), deleter, self.tenant_id);
+                Ok((rp, blocking_deleter))
+            })
         })
     }
 
     fn blocking_list(&self, path: &str, args: OpList) -> Result<(RpList, Self::BlockingLister)> {
-        self.handle.block_on(async {
-            let (rp, lister) = self.inner.list(path, args).await?;
-            let blocking_lister = Self::BlockingLister::new(self.handle.clone(), lister);
-            Ok((rp, blocking_lister))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(async {
+                let (rp, lister) = self.inner.list(path, args).await?;
+                let blocking_lister =
+                    Self::BlockingLister::new(self.handle.clone(), lister, self.tenant_id);
+                Ok((rp, blocking_lister))
+            })
         })
     }
 }
@@ -314,73 +403,88 @@ impl<A: Access> LayeredAccess for BlockingAccessor<A> {
 pub struct BlockingWrapper<I> {
     handle: Handle,
     inner: I,
+    tenant_id: u64,
 }
 
 impl<I> BlockingWrapper<I> {
-    fn new(handle: Handle, inner: I) -> Self {
-        Self { handle, inner }
+    fn new(handle: Handle, inner: I, tenant_id: u64) -> Self {
+        Self {
+            handle,
+            inner,
+            tenant_id,
+        }
     }
 }
 
 impl<I: oio::Read + 'static> oio::BlockingRead for BlockingWrapper<I> {
     fn read(&mut self) -> Result<Buffer> {
-        self.handle.block_on(self.inner.read())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.read()))
     }
 }
 
 impl<I: oio::Write + 'static> oio::BlockingWrite for BlockingWrapper<I> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
-        self.handle.block_on(self.inner.write(bs))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.write(bs))
+        })
     }
 
     fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
-        self.handle.block_on(self.inner.write_with_offset(offset, bs))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle
+                .block_on(self.inner.write_with_offset(offset, bs))
+        })
     }
 
     fn close(&mut self) -> Result<()> {
-        self.handle.block_on(self.inner.close())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.close()))
     }
 
     fn abort(&mut self) -> Result<()> {
-        self.handle.block_on(self.inner.abort())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.abort()))
     }
 }
 
 impl<I: oio::ObMultipartWrite + 'static> oio::BlockingObMultipartWrite for BlockingWrapper<I> {
     fn initiate_part(&mut self) -> Result<()> {
-        self.handle.block_on(self.inner.initiate_part())
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle.block_on(self.inner.initiate_part())
+        })
     }
 
     fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
-        self.handle.block_on(self.inner.write_with_part_id(bs, part_id))
+        TENANT_ID.sync_scope(self.tenant_id, || {
+            self.handle
+                .block_on(self.inner.write_with_part_id(bs, part_id))
+        })
     }
 
     fn close(&mut self) -> Result<()> {
-        self.handle.block_on(self.inner.close())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.close()))
     }
 
     fn abort(&mut self) -> Result<()> {
-        self.handle.block_on(self.inner.abort())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.abort()))
     }
 }
 
 impl<I: oio::List> oio::BlockingList for BlockingWrapper<I> {
     fn next(&mut self) -> Result<Option<oio::Entry>> {
-        self.handle.block_on(self.inner.next())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.next()))
     }
 }
 
 impl<I: oio::Delete + 'static> oio::BlockingDelete for BlockingWrapper<I> {
     fn delete(&mut self, path: &str, args: OpDelete) -> Result<()> {
-        self.inner.delete(path, args)
+        TENANT_ID.sync_scope(self.tenant_id, || self.inner.delete(path, args))
     }
 
     fn flush(&mut self) -> Result<usize> {
-        self.handle.block_on(self.inner.flush())
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.flush()))
     }
 
     fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
-        self.inner.deleted(path, args)
+        TENANT_ID.sync_scope(self.tenant_id, || self.inner.deleted(path, args))
     }
 }
 
@@ -400,13 +504,13 @@ mod tests {
 
     fn create_blocking_layer() -> Result<BlockingLayer> {
         let _guard = RUNTIME.enter();
-        BlockingLayer::create()
+        BlockingLayer::create(None)
     }
 
     #[test]
     fn test_blocking_layer_in_blocking_context() {
         // create in a blocking context should fail
-        let layer = BlockingLayer::create();
+        let layer = BlockingLayer::create(None);
         assert!(layer.is_err());
 
         // create in an async context and drop in a blocking context
@@ -419,7 +523,7 @@ mod tests {
         // create and drop in an async context
         let _guard = RUNTIME.enter();
 
-        let layer = BlockingLayer::create();
+        let layer = BlockingLayer::create(None);
         assert!(layer.is_ok());
     }
 }

@@ -280,6 +280,7 @@ typedef struct opendal_operator {
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
+  uint64_t tenant_id;
 } opendal_operator;
 
 /**
@@ -354,6 +355,7 @@ typedef struct opendal_reader {
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
+  uint64_t tenant_id;
 } opendal_reader;
 
 /**
@@ -384,6 +386,7 @@ typedef struct opendal_writer {
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
+  uint64_t tenant_id;
 } opendal_writer;
 
 /**
@@ -413,6 +416,7 @@ typedef struct opendal_multipart_writer {
    * Only touch this on judging whether it is NULL.
    */
   void *inner;
+  uint64_t tenant_id;
 } opendal_multipart_writer;
 
 /**
@@ -765,6 +769,43 @@ typedef struct opendal_result_writer_write {
 extern "C" {
 #endif // __cplusplus
 
+uint64_t opendal_get_tenant_id(void);
+
+/**
+ * \brief init opendal environment
+ *
+ * Task to initialize the environment include:
+ * - init global allocator and releaser
+ * - init global runtime
+ * - init global http client
+ * - init global log handler
+ *
+ * @param alloc: the function to allocate memory
+ * @param free: the function to release memory
+ * @param loghandler: the function to handle log message
+ * @param thread_cnt: the thread count of global runtime
+ * @param pool_max_idle_per_host: the max idle connection per host
+ * @param pool_max_idle_time_s: the max idle time for a connection
+ * @param connect_timeout_s: the connect timeout for a connection
+ */
+struct opendal_error *opendal_init_env(void *alloc,
+                                       void *free,
+                                       void *loghandler,
+                                       uint32_t log_level,
+                                       uintptr_t thread_cnt,
+                                       uintptr_t pool_max_idle_per_host,
+                                       uint64_t pool_max_idle_time_s,
+                                       uint64_t connect_timeout_s);
+
+/**
+ * \brief fin opendal environment
+ *
+ * Task to finalize the environment include:
+ * - drop global runtime
+ * - drop global http client
+ */
+void opendal_fin_env(void);
+
 /**
  * \brief Frees the opendal_error, ok to call on NULL
  */
@@ -891,41 +932,6 @@ bool opendal_metadata_is_dir(const struct opendal_metadata *self);
  * ```
  */
 int64_t opendal_metadata_last_modified_ms(const struct opendal_metadata *self);
-
-/**
- * \brief init opendal environment
- *
- * Task to initialize the environment include:
- * - init global allocator and releaser
- * - init global runtime
- * - init global http client
- * - init global log handler
- *
- * @param alloc: the function to allocate memory
- * @param free: the function to release memory
- * @param loghandler: the function to handle log message
- * @param thread_cnt: the thread count of global runtime
- * @param pool_max_idle_per_host: the max idle connection per host
- * @param pool_max_idle_time_s: the max idle time for a connection
- */
-struct opendal_error *opendal_init_env(void *alloc,
-                                       void *free,
-                                       void *loghandler,
-                                       uint32_t log_level,
-                                       uintptr_t thread_cnt,
-                                       uintptr_t pool_max_idle_per_host,
-                                       uint64_t pool_max_idle_time_s,
-                                       uint64_t connect_timeout_s);
-
-/**
- * \brief fin opendal environment
- *
- * Task to finalize the environment include:
- * - drop global allocator and releaser
- * - drop global runtime
- * - drop global http client
- */
-void opendal_fin_env(void);
 
 /**
  * \brief Free the heap-allocated operator pointed by opendal_operator.
