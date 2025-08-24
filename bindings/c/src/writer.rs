@@ -19,7 +19,7 @@ use ::opendal as core;
 use std::{ffi::c_void, panic::catch_unwind, panic::AssertUnwindSafe};
 
 use super::*;
-use common::THREAD_TENANT_ID;
+use common::ThreadTenantIdGuard;
 
 /// \brief The result type returned by opendal's writer operation.
 /// \note The opendal_writer actually owns a pointer to
@@ -55,7 +55,7 @@ impl opendal_writer {
         bytes: &opendal_bytes,
     ) -> opendal_result_writer_write {
         let ret = catch_unwind(AssertUnwindSafe(|| {
-            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
+            let _guard = ThreadTenantIdGuard::new(self.tenant_id);
             let size = bytes.len;
             // Since the write method will consume the buffer, and the buffer passed 
             // in from outside needs to be released externally, in order to adhere to 
@@ -90,7 +90,7 @@ impl opendal_writer {
         bytes: &opendal_bytes,
     ) -> opendal_result_writer_write {
         let ret = catch_unwind(AssertUnwindSafe(|| {
-            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
+            let _guard = ThreadTenantIdGuard::new(self.tenant_id);
             let size = bytes.len;
             // Since the write method will consume the buffer, and the buffer passed 
             // in from outside needs to be released externally, in order to adhere to 

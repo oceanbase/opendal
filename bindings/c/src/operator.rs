@@ -34,7 +34,7 @@ use core::Configurator;
 use core::layers::DEFAULT_TENANT_ID;
 
 use super::*;
-use common::{HTTP_CLIENT, RUNTIME};
+use common::{HTTP_CLIENT, RUNTIME, ThreadTenantIdGuard};
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -322,6 +322,7 @@ pub unsafe extern "C" fn opendal_operator_write(
     bytes: &opendal_bytes,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -348,6 +349,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_match(
     bytes: &opendal_bytes,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -378,6 +380,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_none_match(
     bytes: &opendal_bytes
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -404,6 +407,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_not_exists(
     bytes: &opendal_bytes
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -463,6 +467,7 @@ pub unsafe extern "C" fn opendal_operator_read(
     path: *const c_char,
 ) -> opendal_result_read {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -531,6 +536,7 @@ pub unsafe extern "C" fn opendal_operator_reader(
     path: *const c_char,
 ) -> opendal_result_operator_reader {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -599,6 +605,7 @@ pub unsafe extern "C" fn opendal_operator_writer(
     path: *const c_char,
 ) -> opendal_result_operator_writer {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -659,6 +666,7 @@ pub unsafe extern "C" fn opendal_operator_append_writer(
     path: *const c_char,
 ) -> opendal_result_operator_writer {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -720,6 +728,7 @@ pub unsafe extern "C" fn opendal_operator_multipart_writer(
     path: *const c_char,
 ) -> opendal_result_operator_multipart_writer {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {
@@ -828,6 +837,7 @@ pub unsafe extern "C" fn opendal_operator_put_object_tagging(
     tagging: &opendal_object_tagging,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         if path.is_null() {
             return opendal_error::new(core::Error::new(
                 core::ErrorKind::ConfigInvalid,
@@ -868,6 +878,7 @@ pub unsafe extern "C" fn opendal_operator_get_object_tagging(
     path: *const c_char,
 ) -> opendal_result_get_object_tagging {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         if path.is_null() {
             return opendal_result_get_object_tagging {
                 tagging: std::ptr::null_mut(),
@@ -942,6 +953,7 @@ pub unsafe extern "C" fn opendal_operator_is_exist(
     path: *const c_char,
 ) -> opendal_result_is_exist {
     let ret = catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
             Ok(valid_str) => valid_str,
             Err(e) => {

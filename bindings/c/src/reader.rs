@@ -22,7 +22,7 @@ use std::panic::AssertUnwindSafe;
 use ::opendal as core;
 
 use super::*;
-use common::THREAD_TENANT_ID;
+use common::ThreadTenantIdGuard;
 
 /// \brief The result type returned by opendal's reader operation.
 ///
@@ -61,7 +61,7 @@ impl opendal_reader {
         offset: usize,
     ) -> opendal_result_reader_read {
         let ret = catch_unwind(AssertUnwindSafe(|| {
-            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
+            let _guard = ThreadTenantIdGuard::new(self.tenant_id);
 
             if buf.is_null() || len == 0 {
                 return opendal_result_reader_read {
