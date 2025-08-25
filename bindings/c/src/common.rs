@@ -62,6 +62,28 @@ thread_local! {
   pub static THREAD_TENANT_ID: RefCell<u64> = RefCell::new(DEFAULT_TENANT_ID);
 }
 
+/// A guard to set the tenant id for the current thread
+pub struct ThreadTenantIdGuard {
+    last_thread_tenant_id: u64,
+}
+
+impl ThreadTenantIdGuard {
+    pub fn new(thread_tenant_id: u64) -> Self {
+        let guard = ThreadTenantIdGuard {
+            last_thread_tenant_id: THREAD_TENANT_ID.with(|val| *val.borrow()),
+        };
+
+        THREAD_TENANT_ID.with(|val| *val.borrow_mut() = thread_tenant_id);
+        guard
+    }
+}
+
+impl Drop for ThreadTenantIdGuard {
+    fn drop(&mut self) {
+        THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.last_thread_tenant_id);
+    }
+}
+
 struct CustomAllocator;
 
 unsafe impl GlobalAlloc for CustomAllocator {
@@ -413,5 +435,19 @@ pub fn handle_result_without_ret<T>(result: Result<T, Box<dyn std::any::Any + Se
                 tracing::error!("Caught a panic without msg");
             }
         }
+    }
+}
+
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_thread_tenant_id() {
+        assert_eq!(opendal_get_tenant_id(), DEFAULT_TENANT_ID);
+        {
+            let _guard = ThreadTenantIdGuard::new(1003);
+            assert_eq!(opendal_get_tenant_id(), 1003);
+        }
+        assert_eq!(opendal_get_tenant_id(), DEFAULT_TENANT_ID);
     }
 }

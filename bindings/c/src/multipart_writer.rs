@@ -21,7 +21,7 @@ use std::panic::catch_unwind;
 use std::panic::AssertUnwindSafe;
 
 use super::*;
-use common::THREAD_TENANT_ID;
+use common::ThreadTenantIdGuard;
 
 /// \brief The result type returned by opendal's ob_multipart_writer operation.
 /// \note The opendal_multipart_writer actually owns a pointer to
@@ -75,7 +75,7 @@ impl opendal_multipart_writer {
         part_id: usize,
     ) -> opendal_result_writer_write {
         let ret = catch_unwind(AssertUnwindSafe(|| {
-            THREAD_TENANT_ID.with(|val| *val.borrow_mut() = self.tenant_id);
+            let _guard = ThreadTenantIdGuard::new(self.tenant_id);
             let size = bytes.len;
             // Similar to opendal_writer_write, it is necessary to copy byte here.
             let copy_bytes = std::slice::from_raw_parts(bytes.data, bytes.len).to_vec();

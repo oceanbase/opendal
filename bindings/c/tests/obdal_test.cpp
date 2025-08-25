@@ -899,9 +899,6 @@ TEST_F(ObDalTest, test_catch_panic)
   opendal_c_char_free(nullptr);
 }
 
-
-
-
 int main(int argc, char **argv) 
 {
   ::testing::InitGoogleTest(&argc, argv);
