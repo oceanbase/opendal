@@ -19,9 +19,11 @@ use std::collections::Bound;
 use std::ops::Range;
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::BufMut;
-
+use crate::layers::is_slow;
+use crate::layers::calc_speed;
 use crate::raw::*;
 use crate::*;
 
@@ -90,11 +92,18 @@ impl BlockingReader {
     ///
     /// - Buffer length smaller than range means we have reached the end of file.
     pub fn read(&self, range: impl RangeBounds<u64>) -> Result<Buffer> {
+        let start_time = Instant::now();
         let mut bufs = vec![];
         for buf in self.clone().into_iterator(range)? {
             bufs.push(buf?)
         }
-        Ok(bufs.into_iter().flatten().collect())
+        let buf: Buffer = bufs.into_iter().flatten().collect();
+        let cost_time = start_time.elapsed();
+        let io_size = buf.len() as u64;
+        if is_slow(cost_time, io_size) {
+            tracing::warn!("read {}: is slow, io_size: {}, cost: {:?}, speed: {:.2} MB/s", self.ctx.path(), io_size, cost_time, calc_speed(cost_time, io_size));
+        }
+        Ok(buf)
     }
 
     ///

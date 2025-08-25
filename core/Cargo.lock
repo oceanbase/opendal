@@ -4231,6 +4231,7 @@ dependencies = [
  "etcd-client",
  "fastrace",
  "fastrace-jaeger",
+ "fastrand",
  "flume",
  "foundationdb",
  "futures",

@@ -553,6 +553,24 @@ typedef struct opendal_result_operator_deleter {
 } opendal_result_operator_deleter;
 
 /**
+ * 异步操作 operator
+ */
+typedef struct opendal_async_operator {
+  void *inner;
+  uint64_t tenant_id;
+} opendal_async_operator;
+
+typedef void (*OpenDalAsyncCallbackFn)(struct opendal_error*, int64_t bytes, void *ctx);
+
+/**
+ * \brief Used to write a multipart file asynchronously.
+ */
+typedef struct opendal_async_multipart_writer {
+  void *inner;
+  uint64_t tenant_id;
+} opendal_async_multipart_writer;
+
+/**
  * \brief Metadata for **operator**, users can use this metadata to get information
  * of operator.
  */
@@ -771,6 +789,8 @@ extern "C" {
 
 uint64_t opendal_get_tenant_id(void);
 
+void opendal_register_retry_timeout_fn(void *retry_timeout_ms_fn);
+
 /**
  * \brief init opendal environment
  *
@@ -792,7 +812,9 @@ struct opendal_error *opendal_init_env(void *alloc,
                                        void *free,
                                        void *loghandler,
                                        uint32_t log_level,
-                                       uintptr_t thread_cnt,
+                                       uintptr_t work_thread_cnt,
+                                       uintptr_t block_thread_max_cnt,
+                                       uint64_t block_thread_keep_alive_time_s,
                                        uintptr_t pool_max_idle_per_host,
                                        uint64_t pool_max_idle_time_s,
                                        uint64_t connect_timeout_s);
@@ -1594,6 +1616,75 @@ void opendal_c_char_free(char *ptr);
  * \brief panic test function.
  */
 struct opendal_error *opendal_panic_test(void);
+
+/**
+ * 释放异步操作 operator 的内存
+ */
+void opendal_async_operator_free(const struct opendal_async_operator *ptr);
+
+struct opendal_error *opendal_async_operator_new(const char *scheme,
+                                                 const struct opendal_operator_options *options,
+                                                 struct opendal_async_operator **async_operator);
+
+void opendal_async_operator_write(const struct opendal_async_operator *op,
+                                  const char *path,
+                                  const struct opendal_bytes *bytes,
+                                  OpenDalAsyncCallbackFn callback,
+                                  void *ctx);
+
+void opendal_async_operator_read(const struct opendal_async_operator *op,
+                                 const char *path,
+                                 uint8_t *buf,
+                                 uintptr_t len,
+                                 uintptr_t offset,
+                                 OpenDalAsyncCallbackFn callback,
+                                 void *ctx);
+
+/**
+ * write with if match, only the object is not exist, or the content
+ * is match, the write will succeed. Because not all the services support if_match,
+ * we use write with if not exists and read to implement it.
+ */
+void opendal_async_operator_write_with_if_match(const struct opendal_async_operator *op,
+                                                const char *path,
+                                                const struct opendal_bytes *bytes,
+                                                OpenDalAsyncCallbackFn callback,
+                                                void *ctx);
+
+struct opendal_error *opendal_async_operator_multipart_writer(const struct opendal_async_operator *op,
+                                                              const char *path,
+                                                              struct opendal_async_multipart_writer **opendal_async_multipart_writer);
+
+/**
+ * doc placeholder
+ */
+void opendal_async_multipart_writer_free(struct opendal_async_multipart_writer *ptr);
+
+/**
+ * doc placeholder
+ */
+struct opendal_error *opendal_async_multipart_writer_initiate(struct opendal_async_multipart_writer *self);
+
+/**
+ * Noticed that this function will be called in multiple threads from oceanbase.
+ * so we maintain mutex in type::ob_multipart_writer::ObMultipartWriter.
+ * then we can clone the self.inner to avoid rust borrow checker.
+ */
+void opendal_async_multipart_writer_write(struct opendal_async_multipart_writer *self,
+                                          const struct opendal_bytes *bytes,
+                                          uintptr_t part_id,
+                                          OpenDalAsyncCallbackFn callback,
+                                          void *ctx);
+
+/**
+ * doc placeholder
+ */
+struct opendal_error *opendal_async_multipart_writer_abort(struct opendal_async_multipart_writer *self);
+
+/**
+ * doc placeholder
+ */
+struct opendal_error *opendal_async_multipart_writer_close(struct opendal_async_multipart_writer *self);
 
 /**
  * \brief Get information of underlying accessor.

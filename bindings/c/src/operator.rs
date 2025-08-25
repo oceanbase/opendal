@@ -31,10 +31,9 @@ use ::opendal as core;
 use core::layers::TimeoutLayer;
 use core::Builder;
 use core::Configurator;
-use core::layers::DEFAULT_TENANT_ID;
 
 use super::*;
-use common::{HTTP_CLIENT, RUNTIME, ThreadTenantIdGuard};
+use common::*;
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -92,11 +91,6 @@ impl opendal_operator {
     }
 }
 
-fn get_tenant_id_from_map(map: &HashMap<String, String>) -> u64 {
-    map.get("tenant_id")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_TENANT_ID)
-}
 
 fn build_operator(
     schema: core::Scheme,
@@ -105,7 +99,12 @@ fn build_operator(
     let timeout: u64 = map
         .get("timeout")
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(60);
+        .unwrap_or(SINGLE_IO_TIMEOUT_DEFAULT_S);
+
+    let retry_max_times: usize = map
+        .get("retry_max_times")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(RETRY_MAX_TIMES as usize);
 
     let tenant_id: u64 = get_tenant_id_from_map(&map);
 
@@ -163,6 +162,9 @@ fn build_operator(
             .with_timeout(Duration::from_secs(timeout))
             .with_io_timeout(Duration::from_secs(timeout)),
     );
+    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
+    op = op.layer(core::layers::ObGuardLayer::new());
+
     if !op.info().full_capability().blocking {
         if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
             let handle = tokio::runtime::Handle::try_current()
@@ -1456,29 +1458,20 @@ pub unsafe extern "C" fn opendal_operator_copy(
 /// free the c char
 #[no_mangle]
 pub unsafe extern "C" fn opendal_c_char_free(ptr: *mut c_char) {
-    let ret = catch_unwind(|| {
+    obdal_catch_unwind(|| {
         if !ptr.is_null() {
             let _ = CString::from_raw(ptr);
         }
-    });
-    match handle_result(ret) {
-        Ok(r) => r,
-        Err(err) => {
-            error!("opendal_c_char_free error: {}", *err);
-            opendal_error::opendal_error_free(err);
-        }
-    }
+    }).map_or_else(|err| {
+        error!("opendal_c_char_free error: {}", *err);
+        opendal_error::opendal_error_free(err);
+    }, |_| ());
 }
 
 /// \brief panic test function.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
-    let result = std::panic::catch_unwind(|| {
+    obdal_catch_unwind(|| {    
         panic!("This is a panic message!");
-    });
-
-    match handle_result(result) {
-        Ok(ret) => ret,
-        Err(err) => err,
-    }
+    }).map_or_else(|err| err, |_| std::ptr::null_mut())
 }

@@ -16,7 +16,6 @@
 // under the License.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use uuid::Uuid;
 use futures::select;
@@ -25,6 +24,25 @@ use futures::FutureExt;
 
 use crate::raw::*;
 use crate::*;
+
+/// The result of [`MultipartWrite::write_part`].
+///
+/// services implement should convert MultipartPart to their own represents.
+///
+/// - `part_number` is the index of the part, starting from 0.
+/// - `etag` is the `ETag` of the part.
+/// - `checksum` is the optional checksum of the part.
+#[derive(Clone)]
+pub struct MultipartPart {
+    /// The number of the part, starting from 0.
+    pub part_number: usize,
+    /// The etag of the part.
+    pub etag: String,
+    /// The checksum of the part.
+    pub checksum: Option<String>,
+    /// The block_id of the part, for azblob
+    pub block_id: Option<Uuid>,
+}
 
 /// MultipartWrite is used to implement [`oio::Write`] based on multipart
 /// uploads. By implementing MultipartWrite, services don't need to
@@ -101,24 +119,7 @@ pub trait MultipartWrite: Send + Sync + Unpin + 'static {
     fn abort_part(&self, upload_id: &str) -> impl Future<Output = Result<()>> + MaybeSend;
 }
 
-/// The result of [`MultipartWrite::write_part`].
-///
-/// services implement should convert MultipartPart to their own represents.
-///
-/// - `part_number` is the index of the part, starting from 0.
-/// - `etag` is the `ETag` of the part.
-/// - `checksum` is the optional checksum of the part.
-#[derive(Clone)]
-pub struct MultipartPart {
-    /// The number of the part, starting from 0.
-    pub part_number: usize,
-    /// The etag of the part.
-    pub etag: String,
-    /// The checksum of the part.
-    pub checksum: Option<String>,
-    /// The block_id of the part, for azblob
-    pub block_id: Option<Uuid>,
-}
+
 
 struct WriteInput<W: MultipartWrite> {
     w: Arc<W>,
@@ -140,10 +141,24 @@ pub struct MultipartWriter<W: MultipartWrite> {
     next_part_number: usize,
 
 
-    results: Arc<Mutex<Vec<MultipartPart>>>,
     factory: fn(WriteInput<W>) -> BoxedStaticFuture<(WriteInput<W>, Result<MultipartPart>)>,
 
     tasks: ConcurrentTasks<WriteInput<W>, MultipartPart>,
+}
+
+impl<W: MultipartWrite> Clone for MultipartWriter<W> {
+    fn clone(&self) -> Self {
+        Self {
+            w: self.w.clone(),
+            executor: self.executor.clone(),
+            upload_id: self.upload_id.clone(),
+            parts: Vec::new(),
+            cache: None,
+            next_part_number: 0,
+            factory: self.factory,
+            tasks: ConcurrentTasks::new(self.executor.clone(), 1, self.factory),
+        }
+    }
 }
 
 /// # Safety
@@ -194,7 +209,6 @@ impl<W: MultipartWrite> MultipartWriter<W> {
             parts: Vec::new(),
             cache: None,
             next_part_number: 0,
-            results: Arc::new(Mutex::new(Vec::new())),
             factory: factory,
             tasks: ConcurrentTasks::new(executor, concurrent, factory),
         }
@@ -329,7 +343,7 @@ where
 
     // Since ob may use multiple threads to execute write_with_part_id at the same time, 
     // self.factory is called directly to initiate IO
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<MultipartPart> {
         let upload_id = self.upload_id.clone()
             .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
         let bytes = bs;
@@ -340,27 +354,14 @@ where
             part_number: part_id,
             bytes,
         }).await;
-        return match o {
-            Ok(o) => {
-                // std::sync::mutex cannot be called across await
-                let mut results = self.results.lock().unwrap();
-                results.push(o);
-                Ok(())
-            }
-            Err(err) => Err(err)
-        }
+        o
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self, parts: Vec<MultipartPart>) -> Result<()> {
         let upload_id = self.upload_id.clone()
             .ok_or(Error::new(ErrorKind::Unexpected, "ob multipart writer not init"))?;
-        {
-            let results = self.results.lock().unwrap(); 
-            for o in results.iter() {
-                self.parts.push(o.clone());
-            }
-        }
         
+        self.parts = parts;
         self.w.complete_part(&upload_id, &self.parts).await
     }
 

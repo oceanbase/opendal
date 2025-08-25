@@ -60,7 +60,7 @@ pub trait Access: Send + Sync + Debug + Unpin + 'static {
     /// Writer is the associated writer returned in `write` operation.
     type Writer: oio::Write;
     /// ObMultipartWriter is the associated writer return in `ob_multipart_write` operation.
-    type ObMultipartWriter: oio::ObMultipartWrite;
+    type ObMultipartWriter: oio::ObMultipartWrite + Clone;
     /// Lister is the associated lister returned in `list` operation.
     type Lister: oio::List;
     /// Deleter is the associated deleter returned in `delete` operation.

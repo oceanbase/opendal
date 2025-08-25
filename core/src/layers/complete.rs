@@ -542,6 +542,15 @@ impl<W> Drop for CompleteObMultipartWriter<W> {
     }
 }
 
+impl<W> Clone for CompleteObMultipartWriter<W>
+where
+    W: oio::ObMultipartWrite,
+{
+    fn clone(&self) -> Self {
+        CompleteObMultipartWriter { inner: self.inner.clone() }
+    }
+}
+
 impl<W> oio::ObMultipartWrite for CompleteObMultipartWriter<W>
 where 
     W: oio::ObMultipartWrite
@@ -554,7 +563,7 @@ where
         w.initiate_part().await
     }
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
         })?;
@@ -562,12 +571,12 @@ where
         w.write_with_part_id(bs, part_id).await
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
         })?;
 
-        w.close().await?;
+        w.close(parts).await?;
         self.inner = None;
         Ok(())
     }
@@ -596,7 +605,7 @@ where
         w.initiate_part()
     }
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
         })?;
@@ -604,12 +613,12 @@ where
         w.write_with_part_id(bs, part_id)
     }
 
-    fn close(&mut self) -> Result<()> {
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "ob multipart writer has been closed or aborted")
         })?;
 
-        w.close()?;
+        w.close(parts)?;
         self.inner = None;
         Ok(())
     }

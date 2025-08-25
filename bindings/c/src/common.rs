@@ -15,39 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::RwLock;
-use std::sync::Once;
-use std::ffi::{c_void, CString, c_char};
-use std::fmt::Write;
-use std::panic::catch_unwind;
-use std::collections::HashMap;
-use std::time::Duration;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ffi::{c_char, c_void, CString};
+use std::fmt::Write;
+use std::future::Future;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Once;
+use std::sync::RwLock;
+use std::time::Duration;
+use std::time::Instant;
 
 use tokio::runtime::Runtime;
-use tracing::{
-  field::Field,
-  level_filters::LevelFilter,
-  span,
-  Event,
-  Subscriber,
-};
+use tracing::Instrument;
+use tracing::{field::Field, level_filters::LevelFilter, span, Event, Subscriber};
 use tracing_subscriber::{
-  self,
-  fmt,
-  layer::{Context, Layer, SubscriberExt},
-  registry::LookupSpan,
-  util::SubscriberInitExt,
-  fmt::time::OffsetTime,
+    self, fmt,
+    fmt::time::OffsetTime,
+    layer::{Context, Layer, SubscriberExt},
+    registry::LookupSpan,
+    util::SubscriberInitExt,
 };
 
-use core::ErrorKind;
-use ::opendal as core;
-use core::raw::HttpClient;
-use core::layers::DEFAULT_TENANT_ID;
 use super::*;
+use ::opendal as core;
+use core::layers::{DEFAULT_TENANT_ID, RETRY_TIMEOUT, TASK_START_TIME, TENANT_ID, RETRY_TIMEOUT_DEFAULT};
+use core::raw::HttpClient;
+use core::ErrorKind;
+
+// used for async io callback
+pub type OpenDalAsyncCallbackFn =
+    unsafe extern "C" fn(*mut opendal_error, bytes: i64, ctx: *mut c_void);
 
 pub static RUNTIME: RwLock<Option<Runtime>> = RwLock::new(None);
 pub static HTTP_CLIENT: RwLock<Option<HttpClient>> = RwLock::new(None);
@@ -57,7 +56,14 @@ pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
 static mut ALLOC_FN: Option<AllocFn> = None;
 static mut FREE_FN: Option<FreeFn> = None;
+pub type RetryTimeoutFn = unsafe extern "C" fn() -> u64;
 
+// used for get retry timeout param from oceanbase
+static mut RETRY_TIMEOUT_MS_FN: Option<RetryTimeoutFn> = None;
+pub static SINGLE_IO_TIMEOUT_DEFAULT_S: u64 = 60;
+pub static RETRY_MAX_TIMES: u64 = 10;
+
+// before enter the tokio runtime, all the memory allocation will use this thread local variable
 thread_local! {
   pub static THREAD_TENANT_ID: RefCell<u64> = RefCell::new(DEFAULT_TENANT_ID);
 }
@@ -187,14 +193,25 @@ pub extern "C" fn opendal_get_tenant_id() -> u64 {
     match core::layers::TENANT_ID.try_with(|id| {
         tenant_id = *id;
     }) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(_) => {
-          THREAD_TENANT_ID.with(|id| {
-            tenant_id = *id.borrow();
-          });
+            THREAD_TENANT_ID.with(|id| {
+                tenant_id = *id.borrow();
+            });
         }
     }
     tenant_id
+}
+
+#[no_mangle]
+pub extern "C" fn opendal_register_retry_timeout_fn(retry_timeout_ms_fn: *mut c_void) {
+    unsafe {
+        RETRY_TIMEOUT_MS_FN = if retry_timeout_ms_fn.is_null() {
+            None
+        } else {
+            Some(std::mem::transmute(retry_timeout_ms_fn))
+        };
+    }
 }
 
 /// \brief init opendal environment
@@ -218,7 +235,9 @@ pub extern "C" fn opendal_init_env(
     free: *mut c_void,
     loghandler: *mut c_void,
     log_level: u32,
-    thread_cnt: usize,
+    work_thread_cnt: usize,
+    block_thread_max_cnt: usize,
+    block_thread_keep_alive_time_s: u64,
     pool_max_idle_per_host: usize,
     pool_max_idle_time_s: u64,
     connect_timeout_s: u64,
@@ -241,28 +260,32 @@ pub extern "C" fn opendal_init_env(
 
         let mut global_runtime = RUNTIME.write().expect("failed to lock global RUNTIME");
         match tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(thread_cnt as usize)
+            .worker_threads(work_thread_cnt)
+            .max_blocking_threads(block_thread_max_cnt)
+            .thread_keep_alive(Duration::from_secs(block_thread_keep_alive_time_s))
             .thread_name("obdal")
             .enable_all()
-            .build() {
+            .build()
+        {
             Ok(runtime) => *global_runtime = Some(runtime),
             Err(e) => {
-                return opendal_error::new(
-                    core::Error::new(
-                        core::ErrorKind::Unexpected, format!("failed to build tokio runtime: {}", e.to_string())
-                    )
-                )
+                return opendal_error::new(core::Error::new(
+                    core::ErrorKind::Unexpected,
+                    format!("failed to build tokio runtime: {}", e.to_string()),
+                ))
             }
         }
 
         let client = reqwest::Client::builder()
-                .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
-                .pool_max_idle_per_host(pool_max_idle_per_host)
-                .connect_timeout(Duration::from_secs(connect_timeout_s))
-                .build();
+            .pool_idle_timeout(Some(Duration::from_secs(pool_max_idle_time_s)))
+            .pool_max_idle_per_host(pool_max_idle_per_host)
+            .connect_timeout(Duration::from_secs(connect_timeout_s))
+            .build();
         match client {
             Ok(client) => {
-                let mut http_client = HTTP_CLIENT.write().expect("failed to lock global HTTP_CLIENT");
+                let mut http_client = HTTP_CLIENT
+                    .write()
+                    .expect("failed to lock global HTTP_CLIENT");
                 *http_client = Some(HttpClient::with(client));
             }
             Err(e) => {
@@ -287,21 +310,26 @@ pub extern "C" fn opendal_init_env(
             _ => LevelFilter::INFO,
         };
 
-        let mut ret: *mut opendal_error = std::ptr::null_mut(); 
+        let mut ret: *mut opendal_error = std::ptr::null_mut();
         TRACING_INIT_ONCE.call_once(|| {
             if loghandler.is_null() {
                 let timer = OffsetTime::local_rfc_3339();
                 if let Err(e) = timer {
                     ret = opendal_error::new(core::Error::new(
-                            core::ErrorKind::Unexpected,
-                            format!("{}, {}", e.to_string(), "failed to get local offset"),
-                        ));
+                        core::ErrorKind::Unexpected,
+                        format!("{}, {}", e.to_string(), "failed to get local offset"),
+                    ));
                 }
                 match tracing_subscriber::registry()
-                    .with(fmt::layer().pretty().with_timer(timer.unwrap()).with_filter(log_level))
+                    .with(
+                        fmt::layer()
+                            .pretty()
+                            .with_timer(timer.unwrap())
+                            .with_filter(log_level),
+                    )
                     .try_init()
                 {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => {
                         unsafe {
                             ALLOC_FN = None;
@@ -314,8 +342,10 @@ pub extern "C" fn opendal_init_env(
                 }
             } else {
                 match tracing_subscriber::registry()
-                        .with(ObLogLayer.with_filter(log_level)).try_init() {
-                    Ok(_) => {},
+                    .with(ObLogLayer.with_filter(log_level))
+                    .try_init()
+                {
+                    Ok(_) => {}
                     Err(e) => {
                         unsafe {
                             ALLOC_FN = None;
@@ -359,10 +389,11 @@ pub extern "C" fn opendal_fin_env() {
             tracing::error!("failed to lock global RUNTIME: {}", e);
         }
     }
+    fastrace::flush();
 
-    unsafe  {
+    unsafe {
         OB_LOG_HANDLER = None;
-        // Even after the tokio runtime is dropped, some TLS (Thread Local Storage) variables 
+        // Even after the tokio runtime is dropped, some TLS (Thread Local Storage) variables
         // are only released when the thread exits, preventing malloc and free from being unlinked.
         // ALLOC_FN = None;
         // FREE_FN = None;
@@ -420,8 +451,6 @@ pub fn dump_panic(err: Box<dyn std::any::Any + Send>) {
     }
 }
 
-
-
 /// \breif Handle the result of panic::catch_unwind
 /// if panic happens, log the error
 /// if not, return null
@@ -438,7 +467,61 @@ pub fn handle_result_without_ret<T>(result: Result<T, Box<dyn std::any::Any + Se
     }
 }
 
+pub fn obdal_catch_unwind<T>(f: impl FnOnce() -> T) -> Result<T, *mut opendal_error> {
+    let ret = catch_unwind(AssertUnwindSafe(|| f()));
+    handle_result(ret)
+}
+
+pub fn get_tenant_id_from_map(map: &HashMap<String, String>) -> u64 {
+    map.get("tenant_id")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_TENANT_ID)
+}
+
+pub fn get_retry_timeout() -> Duration {
+    unsafe {
+        if let Some(retry_timeout_ms_fn) = RETRY_TIMEOUT_MS_FN {
+            Duration::from_millis(retry_timeout_ms_fn())
+        } else {
+            RETRY_TIMEOUT_DEFAULT
+        }
+    }
+}
+
+/// spawn a future in the tokio runtime, with some task local variables,
+/// like tenant_id and retry_timeout,
+/// may be panic, so if you use it, should be in a obdal_catch_unwind block
+pub fn obdal_spawn(f: impl Future<Output = ()> + Send + 'static, tenant_id: u64) {
+    let retry_timeout = get_retry_timeout();
+    let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
+    let runtime = runtime_guard.as_ref().expect("runtime not initialized");
+    runtime.spawn(TENANT_ID.scope(
+        tenant_id,
+        TASK_START_TIME.scope(
+            Some(Instant::now()),
+            RETRY_TIMEOUT.scope(Some(retry_timeout), f.in_current_span()),
+        ),
+    ));
+}
+
+/// block on a future in the tokio runtime, with some task local variables,
+/// like tenant_id and retry_timeout,
+/// may be panic, so if you use it, should be in a obdal_catch_unwind block
+pub fn obdal_block_on<'a, T>(f: impl Future<Output = T> + Send + 'a, tenant_id: u64) -> T {
+    let retry_timeout = get_retry_timeout();
+    let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
+    let runtime = runtime_guard.as_ref().expect("runtime not initialized");
+    runtime.block_on(TENANT_ID.scope(
+        tenant_id,
+        TASK_START_TIME.scope(
+            Some(Instant::now()),
+            RETRY_TIMEOUT.scope(Some(retry_timeout), f.in_current_span()),
+        ),
+    ))
+}
+
 mod test {
+    #[warn(unused_imports)]
     use super::*;
 
     #[test]

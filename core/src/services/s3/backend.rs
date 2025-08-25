@@ -1146,7 +1146,7 @@ impl Access for S3Backend {
             }
             PresignOperation::Write(_) => {
                 self.core
-                    .s3_put_object_request(path, None, &OpWrite::default(), Buffer::new())?
+                    .s3_put_object_request(path, None, &OpWrite::default(), Buffer::new()).await?
             }
         };
 

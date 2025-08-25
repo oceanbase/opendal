@@ -41,6 +41,9 @@ pub struct opendal_bytes {
     pub capacity: usize,
 }
 
+unsafe impl Sync for opendal_bytes {}
+unsafe impl Send for opendal_bytes {}
+
 impl opendal_bytes {
     pub(crate) fn empty() -> Self {
         Self {
@@ -121,9 +124,7 @@ impl opendal_object_tagging {
     /// \brief Constructs a new opendal_operator_options
     #[no_mangle]
     pub unsafe extern "C" fn opendal_object_tagging_new() -> *mut Self {
-        let ret = catch_unwind(|| {
-            Self::new()
-        });
+        let ret = catch_unwind(|| Self::new());
         match ret {
             Ok(tagging) => tagging,
             Err(err) => {
@@ -173,12 +174,12 @@ impl opendal_object_tagging {
                     }
                 }
             };
-    
+
             if let Some(val) = self.deref().get(key) {
                 return opendal_result_object_tagging_get {
                     value: opendal_bytes::new(Buffer::from(val.clone().into_bytes())),
                     error: std::ptr::null_mut(),
-                }
+                };
             }
             opendal_result_object_tagging_get {
                 value: opendal_bytes::empty(),
@@ -191,8 +192,8 @@ impl opendal_object_tagging {
             Err(error) => opendal_result_object_tagging_get {
                 value: opendal_bytes::empty(),
                 error,
-            }
-        }        
+            },
+        }
     }
 
     /// \brief Construct a new opendal_operator_options from a HashMap<String, String>
@@ -336,16 +337,10 @@ pub struct ObSpan {
 
 impl ObSpan {
     fn new(tenant_id: u64, trace_id: &str) -> Self {
-        let span = span!(
-            Level::INFO,
-            "",
-            tenant_id = tenant_id,
-            trace_id = trace_id,
-        )
-        .entered();
+        let span = span!(Level::INFO, "", tenant_id = tenant_id, trace_id = trace_id,).entered();
         let option_span = Some(span);
         let span_ptr = Box::into_raw(Box::new(option_span)) as *mut c_void;
-        ObSpan { span: span_ptr }
+        Self { span: span_ptr }
     }
 }
 
@@ -369,7 +364,7 @@ pub extern "C" fn ob_new_span(tenant_id: u64, trace_id: *const c_char) -> *mut O
         if trace_id.is_null() {
             return std::ptr::null_mut();
         }
-    
+
         let c_str = unsafe { CStr::from_ptr(trace_id) };
         match c_str.to_str() {
             Ok(trace_id_str) => {

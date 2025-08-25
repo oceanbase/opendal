@@ -15,34 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod api;
-pub use api::BlockingWrite;
-pub use api::BlockingWriter;
-pub use api::Write;
-pub use api::Writer;
-pub use api::ObMultipartWrite;
-pub use api::ObMultipartWriter;
-pub use api::BlockingObMultipartWrite;
-pub use api::BlockingObMultipartWriter;
+//! `retry` provides the retry functionality for the raw API.
+//! reference to [`backoff`] module for the retry backoff strategy.
 
-mod multipart_write;
-pub use multipart_write::MultipartPart;
-pub use multipart_write::MultipartWrite;
-pub use multipart_write::MultipartWriter;
+mod backoff;
+pub use backoff::*;
+
+mod retry;
+pub use retry::*;
+
+mod retry_with_context;
+pub use retry_with_context::*;
 
 
-mod append_write;
-pub use append_write::AppendWrite;
-pub use append_write::AppendWriter;
+mod blocking_retry;
+pub use blocking_retry::*;
 
-mod one_shot_write;
-pub use one_shot_write::OneShotWrite;
-pub use one_shot_write::OneShotWriter;
-
-mod block_write;
-pub use block_write::BlockWrite;
-pub use block_write::BlockWriter;
-
-mod position_write;
-pub use position_write::PositionWrite;
-pub use position_write::PositionWriter;
+mod blocking_retry_with_context;
+pub use blocking_retry_with_context::*;

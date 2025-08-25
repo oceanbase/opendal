@@ -246,16 +246,21 @@ impl OssCore {
         Ok(m)
     }
 
-    pub fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
-        match self.checksum_algorithm {
-            None => None,
-            Some(ChecksumAlgorithm::Md5) => {
-                let mut hasher = Md5::new();
-                body.clone().for_each(|b| hasher.update(&b));
-                let digest = hasher.finalize();
-                Some(BASE64_STANDARD.encode(digest))
-            },
-        }
+    pub async fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
+        let checksum_type = self.checksum_algorithm.clone();
+        let body_clone = body.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            match checksum_type {
+                None => None,
+                Some(ChecksumAlgorithm::Md5) => {
+                    let mut hasher = Md5::new();
+                    body_clone.for_each(|b| hasher.update(&b));
+                    let digest = hasher.finalize();
+                    Some(BASE64_STANDARD.encode(digest))
+                },
+            }
+        }).await;
+        res.map_or(None, |s| s)
     }
     pub fn insert_checksum_header(
         &self,
@@ -271,7 +276,7 @@ impl OssCore {
 
 impl OssCore {
     #[allow(clippy::too_many_arguments)]
-    pub fn oss_put_object_request(
+    pub async fn oss_put_object_request(
         &self,
         path: &str,
         size: Option<u64>,
@@ -291,7 +296,7 @@ impl OssCore {
         req = self.insert_sse_headers(req);
 
         // Calculate Checksum.
-        if let Some(checksum) = self.calculate_checksum(&body) {
+        if let Some(checksum) = self.calculate_checksum(&body).await {
             // Set Checksum header.
             req = self.insert_checksum_header(req, &checksum);
         }
@@ -300,7 +305,7 @@ impl OssCore {
         Ok(req)
     }
 
-    pub fn oss_append_object_request(
+    pub async fn oss_append_object_request(
         &self,
         path: &str,
         position: u64,
@@ -325,7 +330,7 @@ impl OssCore {
         req = self.insert_sse_headers(req);
 
         // Calculate Checksum.
-        if let Some(checksum) = self.calculate_checksum(&body) {
+        if let Some(checksum) = self.calculate_checksum(&body).await {
             // Set Checksum header.
             req = self.insert_checksum_header(req, &checksum);
         }
@@ -640,7 +645,7 @@ impl OssCore {
         let mut req = Request::put(&url);
         req = req.header(CONTENT_LENGTH, size);
         // Calculate Checksum.
-        if let Some(checksum) = self.calculate_checksum(&body) {
+        if let Some(checksum) = self.calculate_checksum(&body).await {
             // Set Checksum header.
             req = self.insert_checksum_header(req, &checksum);
         }
@@ -884,7 +889,7 @@ impl From<OpPutObjTag> for Tagging {
 }
 
 #[derive(PartialEq)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ChecksumAlgorithm {
     Md5,
 }

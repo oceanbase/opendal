@@ -452,15 +452,15 @@ impl<I: oio::ObMultipartWrite + 'static> oio::BlockingObMultipartWrite for Block
         })
     }
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         TENANT_ID.sync_scope(self.tenant_id, || {
             self.handle
                 .block_on(self.inner.write_with_part_id(bs, part_id))
         })
     }
 
-    fn close(&mut self) -> Result<()> {
-        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.close()))
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        TENANT_ID.sync_scope(self.tenant_id, || self.handle.block_on(self.inner.close(parts)))
     }
 
     fn abort(&mut self) -> Result<()> {

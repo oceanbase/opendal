@@ -18,12 +18,15 @@
 use std::ops::Range;
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::BufMut;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 
+use crate::layers::is_slow;
+use crate::layers::calc_speed;
 use crate::*;
 
 /// Reader is designed to read data from given path in an asynchronous
@@ -110,8 +113,15 @@ impl Reader {
     /// This operation is zero-copy, which means it keeps the [`bytes::Bytes`] returned by underlying
     /// storage services without any extra copy or intensive memory allocations.
     pub async fn read(&self, range: impl RangeBounds<u64>) -> Result<Buffer> {
+        let start_time = Instant::now();
         let bufs: Vec<_> = self.clone().into_stream(range).await?.try_collect().await?;
-        Ok(bufs.into_iter().flatten().collect())
+        let buf: Buffer = bufs.into_iter().flatten().collect();
+        let cost_time = start_time.elapsed();
+        let io_size = buf.len() as u64;
+        if is_slow(cost_time, io_size) {
+            tracing::warn!("read {}: is slow, io_size: {}, cost: {:?}, speed: {:.2} MB/s", self.ctx.path(), io_size, cost_time, calc_speed(cost_time, io_size));
+        }
+        Ok(buf)
     }
 
     /// Read all data from reader into given [`BufMut`].

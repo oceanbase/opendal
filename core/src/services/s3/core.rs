@@ -259,28 +259,35 @@ impl S3Core {
 
         req
     }
-    pub fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
-        match self.checksum_algorithm {
-            None => None,
-            Some(ChecksumAlgorithm::Crc32c) => {
-                let mut crc = 0u32;
-                body.clone()
-                    .for_each(|b| crc = crc32c::crc32c_append(crc, &b));
-                Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
-            },
-            Some(ChecksumAlgorithm::Crc32) => {
-                let mut hasher = Hasher::new();
-                body.clone().for_each(|b| hasher.update(&b));
-                let digest = hasher.finalize();
-                Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
-            },
-            Some(ChecksumAlgorithm::Md5) => {
-                let mut hasher = Md5::new();
-                body.clone().for_each(|b| hasher.update(&b));
-                let digest = hasher.finalize();
-                Some(BASE64_STANDARD.encode(digest))
-            },
-        }
+
+    // must run it in tokio runtime, otherwise will panic
+    pub async fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
+        let checksum_type = self.checksum_algorithm.clone();
+        let body_clone = body.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            match checksum_type {
+                None => None,
+                Some(ChecksumAlgorithm::Crc32c) => {
+                    let mut crc = 0u32;
+                    body_clone
+                        .for_each(|b| crc = crc32c::crc32c_append(crc, &b));
+                    Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
+                },
+                Some(ChecksumAlgorithm::Crc32) => {
+                    let mut hasher = Hasher::new();
+                    body_clone.for_each(|b| hasher.update(&b));
+                    let digest = hasher.finalize();
+                    Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
+                },
+                Some(ChecksumAlgorithm::Md5) => {
+                    let mut hasher = Md5::new();
+                    body_clone.for_each(|b| hasher.update(&b));
+                    let digest = hasher.finalize();
+                    Some(BASE64_STANDARD.encode(digest))
+                },
+            }
+        }).await;
+        res.map_or(None, |s| s)
     }
     pub fn insert_checksum_header(
         &self,
@@ -443,7 +450,7 @@ impl S3Core {
         self.client.fetch(req).await
     }
 
-    pub fn s3_put_object_request(
+    pub async fn s3_put_object_request(
         &self,
         path: &str,
         size: Option<u64>,
@@ -504,9 +511,11 @@ impl S3Core {
         req = self.insert_sse_headers(req, true);
 
         // Calculate Checksum.
-        if let Some(checksum) = self.calculate_checksum(&body) {
-            // Set Checksum header.
-            req = self.insert_checksum_header(req, &checksum);
+        if self.checksum_algorithm.is_some() {
+            if let Some(checksum) = self.calculate_checksum(&body).await {
+                // Set Checksum header.
+                req = self.insert_checksum_header(req, &checksum);
+            }
         }
 
         // Set body
@@ -721,6 +730,7 @@ impl S3Core {
         let mut req = Request::get(&url)
             .body(Buffer::new())
             .map_err(new_request_build_error)?;
+
 
         self.sign(&mut req).await?;
 
@@ -1165,7 +1175,7 @@ impl From<OpPutObjTag> for Tagging {
 }
 
 #[derive(PartialEq)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ChecksumAlgorithm {
     Crc32c,
     Crc32,

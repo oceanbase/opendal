@@ -29,6 +29,8 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
 #include <thread>
 
 class ObDalTest : public ::testing::Test 
@@ -36,6 +38,7 @@ class ObDalTest : public ::testing::Test
 public:
   ObDalTest()
     : op_(nullptr),
+      async_op_(nullptr),
       ob_span_(nullptr),
       type_(MAX_TYPE)
   {
@@ -61,8 +64,7 @@ protected:
       opendal_operator_options_set(options, "disable_config_load", "true");
       opendal_operator_options_set(options, "disable_ec2_metadata", "true");
       opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-      opendal_operator_options_set(options, "checksum_algorithm", "md5");
-      opendal_operator_options_set(options, "tenant_id", "1003");
+      opendal_operator_options_set(options, "checksum_algorithm", "crc32");
     } else if (type_ == OSS) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);
@@ -74,10 +76,11 @@ protected:
       opendal_operator_options_set(options, "endpoint", endpoint);
       opendal_operator_options_set(options, "account_name", access_key_id);
       opendal_operator_options_set(options, "account_key", secret_access_key);
-      opendal_operator_options_set(options, "timeout", "120");
       opendal_operator_options_set(options, "checksum_algorithm", "md5");
     }
-    
+    opendal_operator_options_set(options, "tenant_id", "1003");
+    opendal_operator_options_set(options, "timeout", "5");
+
     // Given A new OpenDAL Blocking Operator
     opendal_result_operator_new result = opendal_operator_new(scheme, options);
     dump_error(result.error);
@@ -86,6 +89,10 @@ protected:
     op_ = result.op;
     ASSERT_NE(nullptr, op_);
 
+    opendal_error *error = opendal_async_operator_new(scheme, options, &async_op_);
+    dump_error(error);
+    ASSERT_EQ(nullptr, error);
+
     opendal_operator_options_free(options);
   }
 
@@ -93,6 +100,9 @@ protected:
   {
     if (op_ != nullptr) {
       opendal_operator_free(op_); 
+    }
+    if (async_op_ != nullptr) {
+      opendal_async_operator_free(async_op_);
     }
     if (ob_span_ != nullptr) {
       ob_drop_span(ob_span_);
@@ -104,10 +114,13 @@ protected:
                                             reinterpret_cast<void *>(my_free),
                                             reinterpret_cast<void *>(ob_log_handler),
                                             6,  // LevelFilter::TRACE,
-                                            32, // thread count 
+                                            32, // work thread count 
+                                            32, // max blocking thread count
+                                            10, // block thread keep alive time (unit s)
                                             32, // max client count
                                             30,
                                             10); // max idle time of client (unit s)
+    opendal_register_retry_timeout_fn(reinterpret_cast<void *>(get_retry_timeout));
     ASSERT_EQ(error, nullptr);
   }
 
@@ -118,8 +131,46 @@ protected:
 protected:
   std::string base_path_;
   const opendal_operator *op_;
+  opendal_async_operator *async_op_;
   ObSpan *ob_span_;
   StorageType type_;
 };
+
+class ObDalAsyncContext {
+  public:
+    void wait()
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock, [this] { return completed_; });
+    }
+    void reset()
+    {
+      completed_ = false;
+      free_error(error_);
+      length_ = 0;
+      callback_count_ = 0;
+    }
+  public:
+    bool completed_ = false;
+    opendal_error *error_ = nullptr;
+    int64_t length_ = 0;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    int64_t callback_count_ = 0;
+  };
+  
+  void obdal_async_callback(opendal_error *error, const int64_t length, void *ctx)
+  {
+    ObDalAsyncContext *context = static_cast<ObDalAsyncContext *>(ctx);
+    {
+      std::unique_lock<std::mutex> lock(context->mutex_);
+      context->length_ = length;
+      context->error_ = error;
+      context->completed_ = true;
+      context->callback_count_++;
+      assert(context->callback_count_ == 1);
+    }
+    context->cv_.notify_all();
+  }
 
 #endif

@@ -85,6 +85,12 @@ void my_free(void *ptr)
     free((char *)ptr - 16);
 }
 
+// the unit is milliseconds
+int64_t get_retry_timeout() 
+{
+  return 20 * 1000;
+}
+
 // compare opendal_bytes with c_char *
 // return 0 if equal, -1 if bytes < str, 1 if bytes > str
 int strcmp(const opendal_bytes &bytes, const char *str)
@@ -168,6 +174,13 @@ bool generate_random_bytes(char *buf, std::size_t size)
   return true;
 }
 
+int rand_int(const int l, const int r) {
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+  std::uniform_int_distribution<unsigned char> dist(l, r); 
+  return dist(gen);
+}
+
 template<class T>
 void shuffle_vec(std::vector<T> &vec)
 {
@@ -248,6 +261,14 @@ void free_error(opendal_error *&error)
   }
 }
 
+static int run_cmd(const std::string &cmd) 
+{
+  const int rc = std::system(cmd.c_str());
+  if (rc != 0) {
+    std::cerr << "[cmd failed] rc=" << rc << " cmd: " << cmd << std::endl;
+  }
+  return rc;
+}
 class DisruptNetwork
 {
 public:
@@ -282,11 +303,11 @@ private:
 
     assert(system(cmd.c_str()) == 0);
     is_disrupted_ = true;
+    usleep(50 * 1000);
   }
 
   void close_disrupt_network() 
   {
-    system("echo | tee /sys/fs/cgroup/net_cls/ob_admin_osdq_cgroup/net_cls.classid");
     system("tc qdisc del dev eth0 root");
     is_disrupted_ = false;
   }

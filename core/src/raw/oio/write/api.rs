@@ -20,6 +20,7 @@ use std::ops::DerefMut;
 
 use crate::raw::*;
 use crate::*;
+use super::multipart_write::MultipartPart;
 
 /// Writer is a type erased [`Write`]
 pub type Writer = Box<dyn WriteDyn>;
@@ -190,13 +191,13 @@ impl<T: BlockingWrite + ?Sized> BlockingWrite for Box<T> {
 pub type ObMultipartWriter = Box<dyn ObMultipartWriteDyn>;
 
 /// ObMultipartWrite is the trait that ObDal returns to callers.
-pub trait ObMultipartWrite: Unpin + Send + Sync {
+pub trait ObMultipartWrite: Unpin + Send + Sync + Clone {
     ///
     fn initiate_part(&mut self) -> impl Future<Output = Result<()>> + MaybeSend;
     ///
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<()>> + MaybeSend;
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<MultipartPart>> + MaybeSend;
     ///
-    fn close(&mut self) -> impl Future<Output = Result<()>> + MaybeSend;
+    fn close(&mut self, parts: Vec<MultipartPart>) -> impl Future<Output = Result<()>> + MaybeSend;
     ///
     fn abort(&mut self) -> impl Future<Output = Result<()>> + MaybeSend;
 }
@@ -206,11 +207,11 @@ impl ObMultipartWrite for () {
         unimplemented!("initiate part is required to be implemented for oio::ObMutipartWrite")
     }
 
-    async fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<MultipartPart> {
         unimplemented!("write_with_part_id is required to be implemented for oio::ObMutipartWrite")
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self, _: Vec<MultipartPart>) -> Result<()> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "output ObMultipartWriter doesn't support close",
@@ -226,26 +227,35 @@ impl ObMultipartWrite for () {
 }
 
 pub trait ObMultipartWriteDyn: Unpin + Send + Sync {
+    fn clone_box(&self) -> Box<dyn ObMultipartWriteDyn>;
+
     fn initiate_part_dyn(&mut self) -> BoxedFuture<Result<()>>;
 
-    fn write_with_part_id_dyn(&mut self, bs: Buffer, part_id: usize) -> BoxedFuture<Result<()>>;
+    fn write_with_part_id_dyn(&mut self, bs: Buffer, part_id: usize) -> BoxedFuture<Result<MultipartPart>>;
 
-    fn close_dyn(&mut self) -> BoxedFuture<Result<()>>;
+    fn close_dyn(&mut self, parts: Vec<MultipartPart>) -> BoxedFuture<Result<()>>;
 
     fn abort_dyn(&mut self) -> BoxedFuture<Result<()>>;
 }
 
-impl<T: ObMultipartWrite + ?Sized> ObMultipartWriteDyn for T {
+impl<T: ObMultipartWrite + Clone + 'static> ObMultipartWriteDyn for T 
+where 
+    T: Sized,  // not for trait objects
+{
+    fn clone_box(&self) -> Box<dyn ObMultipartWriteDyn> {
+        Box::new(self.clone())
+    }
+
     fn initiate_part_dyn(&mut self) -> BoxedFuture<Result<()>> {
         Box::pin(self.initiate_part())
     }
 
-    fn write_with_part_id_dyn(&mut self, bs: Buffer, part_id: usize) -> BoxedFuture<Result<()>> {
+    fn write_with_part_id_dyn(&mut self, bs: Buffer, part_id: usize) -> BoxedFuture<Result<MultipartPart>> {
         Box::pin(self.write_with_part_id(bs, part_id))
     }
 
-    fn close_dyn(&mut self) -> BoxedFuture<Result<()>> {
-        Box::pin(self.close())
+    fn close_dyn(&mut self, parts: Vec<MultipartPart>) -> BoxedFuture<Result<()>> {
+        Box::pin(self.close(parts))
     }
 
     fn abort_dyn(&mut self) -> BoxedFuture<Result<()>> {
@@ -253,17 +263,24 @@ impl<T: ObMultipartWrite + ?Sized> ObMultipartWriteDyn for T {
     }
 }
 
-impl<T: ObMultipartWriteDyn + ?Sized> ObMultipartWrite for Box<T> {
+// for trait objects
+impl Clone for Box<dyn ObMultipartWriteDyn> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
+
+impl ObMultipartWrite for Box<dyn ObMultipartWriteDyn> {
     async fn initiate_part(&mut self) -> Result<()> {
         self.deref_mut().initiate_part_dyn().await
     }
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<MultipartPart> {
         self.deref_mut().write_with_part_id_dyn(bs, part_id).await
     }
 
-    async fn close(&mut self) -> Result<()> {
-        self.deref_mut().close_dyn().await
+    async fn close(&mut self, parts: Vec<MultipartPart>) -> Result<()> {
+        self.deref_mut().close_dyn(parts).await
     }
 
     async fn abort(&mut self) -> Result<()> {
@@ -279,9 +296,9 @@ pub trait BlockingObMultipartWrite: Send + Sync + 'static {
     ///
     fn initiate_part(&mut self) -> Result<()>;
     ///
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()>;
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<MultipartPart>;
     ///
-    fn close(&mut self) -> Result<()>;
+    fn close(&mut self, parts: Vec<MultipartPart>) -> Result<()>;
     ///
     fn abort(&mut self) -> Result<()>;
 }
@@ -291,11 +308,11 @@ impl BlockingObMultipartWrite for () {
         unimplemented!("initiate part is required to be implemented for oio::ObMutipartWrite")
     }
 
-    fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<MultipartPart> {
         unimplemented!("write_with_part_id is required to be implemented for oio::ObMutipartWrite")
     }
 
-    fn close(&mut self) -> Result<()> {
+    fn close(&mut self, _: Vec<MultipartPart>) -> Result<()> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "output ObMultipartWriter doesn't support close",
@@ -315,12 +332,12 @@ impl <T: BlockingObMultipartWrite + ?Sized> BlockingObMultipartWrite for Box<T> 
         (**self).initiate_part()
     }
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<MultipartPart> {
         (**self).write_with_part_id(bs, part_id)
     }
 
-    fn close(&mut self) -> Result<()> {
-        (**self).close()
+    fn close(&mut self, parts: Vec<MultipartPart>) -> Result<()> {
+        (**self).close(parts)
     }
 
     fn abort(&mut self) -> Result<()> {

@@ -26,8 +26,8 @@ pub(crate) use error_context::ErrorContextLayer;
 mod complete;
 pub(crate) use complete::CompleteLayer;
 
-mod concurrent_limit;
-pub use concurrent_limit::ConcurrentLimitLayer;
+// mod concurrent_limit;
+// pub use concurrent_limit::ConcurrentLimitLayer;
 
 mod immutable_index;
 pub use immutable_index::ImmutableIndexLayer;
@@ -78,6 +78,14 @@ pub use self::prometheus_client::PrometheusClientLayerBuilder;
 mod retry;
 pub use self::retry::RetryInterceptor;
 pub use self::retry::RetryLayer;
+pub use self::retry::RETRY_TIMEOUT;
+pub use self::retry::TASK_START_TIME;
+pub use self::retry::RETRY_TIMEOUT_DEFAULT;
+
+mod obguard;
+pub use self::obguard::ObGuardLayer;
+pub use self::obguard::is_slow;
+pub use self::obguard::calc_speed;
 
 #[cfg(feature = "layers-tracing")]
 mod tracing;

@@ -19,14 +19,18 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
-use backon::BlockingRetryable;
-use backon::ExponentialBuilder;
-use backon::Retryable;
+use tokio::task_local;
+
 use log::warn;
 
 use crate::raw::*;
 use crate::*;
+use crate::raw::retry::Retryable;
+use crate::raw::retry::ExponentialBuilder;
+use crate::raw::retry::BlockingRetryable;
+
 
 /// Add retry for temporary failed operations.
 ///
@@ -137,6 +141,31 @@ impl Default for RetryLayer {
             notify: Arc::new(DefaultRetryInterceptor),
         }
     }
+}
+
+task_local! {
+    /// task start time
+    pub static TASK_START_TIME: Option<Instant>;
+    /// The timeout for the retry.
+    pub static RETRY_TIMEOUT: Option<Duration>;
+}
+
+pub const RETRY_TIMEOUT_DEFAULT: Duration = Duration::from_secs(120);
+pub fn get_retry_timeout() -> Option<Duration> {
+    let mut ret = Some(RETRY_TIMEOUT_DEFAULT);
+    let _ =  RETRY_TIMEOUT.try_with(|timeout| {
+        let _ = TASK_START_TIME.try_with(|start_time| {
+            if let (Some(timeout), Some(start_time)) = (timeout, start_time) {
+                let elapsed = start_time.elapsed();
+                if *timeout > elapsed {
+                    ret = Some(*timeout - elapsed);
+                } else {
+                    ret = Some(Duration::from_secs(0));
+                }
+            }
+        });
+    });
+    ret 
 }
 
 impl RetryLayer {
@@ -309,21 +338,31 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
     }
 
     async fn create_dir(&self, path: &str, args: OpCreateDir) -> Result<RpCreateDir> {
+        let mut retry_count = 0;
         { || self.inner.create_dir(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur: Duration| self.notify.intercept(err, dur))
+            .notify(|err, dur: Duration| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
+        let mut retry_count = 0;
         let (rp, reader) = { || self.inner.read(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
-            .map_err(|e| e.set_persistent())?;
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))?;
 
         let retry_reader = RetryReader::new(self.inner.clone(), path.to_string(), args, reader);
         let retry_wrapper = RetryWrapper::new(retry_reader, self.notify.clone(), self.builder);
@@ -332,88 +371,133 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
     }
 
     async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
+        let mut retry_count = 0;
         { || self.inner.write(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        let mut retry_count = 0;
         { || self.inner.ob_multipart_write(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
             .map(|(rp, w)| (rp, RetryWrapper::new(w, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
+        let mut retry_count = 0;
         { || self.inner.stat(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
+        let mut retry_count = 0;
         { || self.inner.delete() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
+        let mut retry_count = 0;
         { || self.inner.copy(from, to, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn rename(&self, from: &str, to: &str, args: OpRename) -> Result<RpRename> {
+        let mut retry_count = 0;
         { || self.inner.rename(from, to, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
+        let mut retry_count = 0;
         { || self.inner.list(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .await
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_create_dir(&self, path: &str, args: OpCreateDir) -> Result<RpCreateDir> {
+        let mut retry_count = 0;
         { || self.inner.blocking_create_dir(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::BlockingReader)> {
+        let mut retry_count = 0;
         let (rp, reader) = { || self.inner.blocking_read(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())?;
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))?;
 
         let retry_reader = RetryReader::new(self.inner.clone(), path.to_string(), args, reader);
         let retry_wrapper = RetryWrapper::new(retry_reader, self.notify.clone(), self.builder);
@@ -422,73 +506,108 @@ impl<A: Access, I: RetryInterceptor> LayeredAccess for RetryAccessor<A, I> {
     }
 
     fn blocking_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingWriter)> {
+        let mut retry_count = 0;
         { || self.inner.blocking_write(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        let mut retry_count = 0;
         { || self.inner.blocking_ob_multipart_write(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
             .map(|(rp, w)| (rp, RetryWrapper::new(w, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_stat(&self, path: &str, args: OpStat) -> Result<RpStat> {
+        let mut retry_count = 0;
         { || self.inner.blocking_stat(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {
+        let mut retry_count = 0;
         { || self.inner.blocking_delete() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
             .map(|(rp, r)| (rp, RetryWrapper::new(r, self.notify.clone(), self.builder)))
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
+        let mut retry_count = 0;
         { || self.inner.blocking_copy(from, to, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_rename(&self, from: &str, to: &str, args: OpRename) -> Result<RpRename> {
+        let mut retry_count = 0;
         { || self.inner.blocking_rename(from, to, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 
     fn blocking_list(&self, path: &str, args: OpList) -> Result<(RpList, Self::BlockingLister)> {
+        let mut retry_count = 0;
         { || self.inner.blocking_list(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
-            .notify(|err, dur| self.notify.intercept(err, dur))
+            .notify(|err, dur| {
+                retry_count += 1;
+                self.notify.intercept(err, dur)
+            })
+            .with_timeout(get_retry_timeout())
             .call()
             .map(|(rp, p)| {
                 let p = RetryWrapper::new(p, self.notify.clone(), self.builder);
                 (rp, p)
             })
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.set_persistent().with_context("retry count", retry_count))
     }
 }
 
@@ -580,8 +699,9 @@ impl<R, I> RetryWrapper<R, I> {
 
 impl<R: oio::Read, I: RetryInterceptor> oio::Read for RetryWrapper<R, I> {
     async fn read(&mut self) -> Result<Buffer> {
-        use backon::RetryableWithContext;
+        use raw::retry::RetryableWithContext;
 
+        let mut retry_count = 0;
         let inner = self.take_inner()?;
 
         let (inner, res) = {
@@ -594,20 +714,23 @@ impl<R: oio::Read, I: RetryInterceptor> oio::Read for RetryWrapper<R, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<R: oio::BlockingRead, I: RetryInterceptor> oio::BlockingRead for RetryWrapper<R, I> {
     fn read(&mut self) -> Result<Buffer> {
-        use backon::BlockingRetryableWithContext;
-
+        use crate::raw::retry::BlockingRetryableWithContext;
         let inner = self.take_inner()?;
-
+        let mut retry_count = 0;
         let (inner, res) = {
             |mut r: R| {
                 let res = r.read();
@@ -618,19 +741,24 @@ impl<R: oio::BlockingRead, I: RetryInterceptor> oio::BlockingRead for RetryWrapp
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .call();
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
     async fn write(&mut self, bs: Buffer) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
         let inner = self.take_inner()?;
+        let mut retry_count = 0;
 
         let ((inner, _), res) = {
             |(mut r, bs): (R, Buffer)| async move {
@@ -642,17 +770,22 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context((inner, bs))
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
     async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
         let inner = self.take_inner()?;
+        let mut retry_count = 0;
 
         let ((inner, _), res) = {
             |(mut r, bs): (R, Buffer)| async move {
@@ -664,18 +797,22 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context((inner, bs))
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent()) 
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent()) 
     }
 
     async fn abort(&mut self) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
         let inner = self.take_inner()?;
-
+        let mut retry_count = 0;
         let (inner, res) = {
             |mut r: R| async move {
                 let res = r.abort().await;
@@ -686,16 +823,21 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
     async fn close(&mut self) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
+        let mut retry_count = 0;
         let inner = self.take_inner()?;
 
         let (inner, res) = {
@@ -708,54 +850,78 @@ impl<R: oio::Write, I: RetryInterceptor> oio::Write for RetryWrapper<R, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count). set_persistent())
     }
 }
 
 impl<R: oio::BlockingWrite, I: RetryInterceptor> oio::BlockingWrite for RetryWrapper<R, I> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().write(bs.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
     fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().write_with_offset(offset, bs.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
     fn close(&mut self) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().close() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 }
 
-impl<R: oio::ObMultipartWrite, I: RetryInterceptor> oio::ObMultipartWrite for RetryWrapper<R, I> {
+impl<R: oio::ObMultipartWrite + Clone, I: RetryInterceptor> Clone for RetryWrapper<R, I> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            notify: self.notify.clone(),
+            builder: self.builder.clone(),
+        }
+    }
+}
+
+impl<R: oio::ObMultipartWrite + Clone, I: RetryInterceptor> oio::ObMultipartWrite for RetryWrapper<R, I> {
     async fn initiate_part(&mut self) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
         
         let inner = self.take_inner()?;
+        let mut retry_count = 0;
 
         let (inner, res) = {
             |mut r: R| async move {
@@ -766,20 +932,23 @@ impl<R: oio::ObMultipartWrite, I: RetryInterceptor> oio::ObMultipartWrite for Re
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
+        use crate::raw::retry::RetryableWithContext;
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
-        use backon::RetryableWithContext;
-
-        let inner = self.take_inner()?;
-
-        let ((inner, _, _), res) = {
+        let inner = self.inner.clone().unwrap();
+        let mut retry_count = 0;
+        let ((_, _, _), res) = {
             |(mut r, bs, part_id): (R, Buffer, usize)| async move {
                 let res = r.write_with_part_id(bs.clone(), part_id).await;
                 ((r, bs, part_id), res)
@@ -788,40 +957,46 @@ impl<R: oio::ObMultipartWrite, I: RetryInterceptor> oio::ObMultipartWrite for Re
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context((inner, bs, part_id))
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
-        self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
-
-    async fn close(&mut self) -> Result<()> {
-        use backon::RetryableWithContext;
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        use crate::raw::retry::RetryableWithContext;
         
         let inner = self.take_inner()?;
-
-        let (inner, res) = {
-            |mut r: R| async move {
-                let res = r.close().await;
-                (r, res)
+        let mut retry_count = 0;
+        let ((inner, _), res) = {
+            |(mut r, parts): (R, Vec<oio::MultipartPart>)| async move {
+                let res = r.close(parts.clone()).await;
+                ((r, parts), res)
             }
         }
         .retry(self.builder)
         .when(|e| e.is_temporary())
-        .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .context((inner, parts))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
     async fn abort(&mut self) -> Result<()> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
         
         let inner = self.take_inner()?;
-
+        let mut retry_count = 0;
         let (inner, res) = {
             |mut r: R| async move {
                 let res = r.abort().await;
@@ -831,68 +1006,84 @@ impl<R: oio::ObMultipartWrite, I: RetryInterceptor> oio::ObMultipartWrite for Re
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<R: oio::BlockingObMultipartWrite, I: RetryInterceptor> oio::BlockingObMultipartWrite for RetryWrapper<R, I> {
     fn initiate_part(&mut self) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().initiate_part() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).    set_persistent())
     }
 
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().write_with_part_id(bs.clone(), part_id) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
 
-    fn close(&mut self) -> Result<()> {
-        { || self.inner.as_mut().unwrap().close() }
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        let mut retry_count = 0;
+        { || self.inner.as_mut().unwrap().close(parts.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
     fn abort(&mut self) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().abort() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<P: oio::List, I: RetryInterceptor> oio::List for RetryWrapper<P, I> {
     async fn next(&mut self) -> Result<Option<oio::Entry>> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
         let inner = self.take_inner()?;
-
+        let mut retry_count = 0;
         let (inner, res) = {
             |mut p: P| async move {
                 let res = p.next().await;
@@ -903,44 +1094,54 @@ impl<P: oio::List, I: RetryInterceptor> oio::List for RetryWrapper<P, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count). set_persistent())
     }
 }
 
 impl<P: oio::BlockingList, I: RetryInterceptor> oio::BlockingList for RetryWrapper<P, I> {
     fn next(&mut self) -> Result<Option<oio::Entry>> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().next() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<P: oio::Delete, I: RetryInterceptor> oio::Delete for RetryWrapper<P, I> {
     fn delete(&mut self, path: &str, args: OpDelete) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().delete(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
     async fn flush(&mut self) -> Result<usize> {
-        use backon::RetryableWithContext;
+        use crate::raw::retry::RetryableWithContext;
 
         let inner = self.take_inner()?;
-
+        let mut retry_count = 0;
         let (inner, res) = {
             |mut p: P| async move {
                 let res = p.flush().await;
@@ -951,46 +1152,59 @@ impl<P: oio::Delete, I: RetryInterceptor> oio::Delete for RetryWrapper<P, I> {
         .retry(self.builder)
         .when(|e| e.is_temporary())
         .context(inner)
-        .notify(|err, dur| self.notify.intercept(err, dur))
+        .notify(|err, dur| {
+            retry_count += 1;
+            self.notify.intercept(err, dur)
+        })
+        .with_timeout(get_retry_timeout())
         .await;
 
         self.inner = Some(inner);
-        res.map_err(|err| err.set_persistent())
+        res.map_err(|err| err.with_context("retry count", retry_count).set_persistent())
     }
 
     fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().deleted(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 }
 
 impl<P: oio::BlockingDelete, I: RetryInterceptor> oio::BlockingDelete for RetryWrapper<P, I> {
     fn delete(&mut self, path: &str, args: OpDelete) -> Result<()> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().delete(path, args.clone()) }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 
     fn flush(&mut self) -> Result<usize> {
+        let mut retry_count = 0;
         { || self.inner.as_mut().unwrap().flush() }
             .retry(self.builder)
             .when(|e| e.is_temporary())
             .notify(|err, dur| {
+                retry_count += 1;
                 self.notify.intercept(err, dur);
             })
+            .with_timeout(get_retry_timeout())
             .call()
-            .map_err(|e| e.set_persistent())
+            .map_err(|e| e.with_context("retry count", retry_count).set_persistent())
     }
 }
 

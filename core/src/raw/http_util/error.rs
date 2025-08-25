@@ -34,7 +34,6 @@ pub fn new_request_credential_error(err: anyhow::Error) -> Error {
         ErrorKind::PermissionDenied,
         "loading credential to sign http request",
     )
-    .set_temporary()
     .with_operation("reqsign::LoadCredential")
     .set_source(err)
 }

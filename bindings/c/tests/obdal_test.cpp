@@ -28,7 +28,9 @@ TEST_F(ObDalTest, test_multi_init)
       reinterpret_cast<void *>(my_free),
       reinterpret_cast<void *>(ob_log_handler),
       6,  // LevelFilter::TRACE,
-      32, // thread count 
+      32, // work thread count 
+      32, // max blocking thread count
+      10,  
       97, // max client count
       30,
       10); // max idle time of client (unit s) 

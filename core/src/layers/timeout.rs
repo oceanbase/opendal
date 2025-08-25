@@ -407,19 +407,28 @@ impl<R: oio::Write> oio::Write for TimeoutWrapper<R> {
     }
 }
 
+impl<R: oio::ObMultipartWrite + Clone> Clone for TimeoutWrapper<R> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            timeout: self.timeout,
+        }
+    }
+}
+
 impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TimeoutWrapper<R> {
     async fn initiate_part(&mut self) -> Result<()> {
         let fut = self.inner.initiate_part();
         Self::io_timeout(self.timeout, Operation::ObMultipartWriterInitiatePart.into_static(), fut).await
     }
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let fut = self.inner.write_with_part_id(bs, part_id);
         Self::io_timeout(self.timeout, Operation::ObMultiPartWriterWriteWithPartId.into_static(), fut).await
     }
 
-    async fn close(&mut self) -> Result<()> {
-        let fut = self.inner.close();
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        let fut = self.inner.close(parts);
         Self::io_timeout(self.timeout, Operation::ObMultipartWriterClose.into_static(), fut).await
     }
 
