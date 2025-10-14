@@ -60,5 +60,5 @@ cd ${CUR_DIR}
 rm -rf build
 mkdir build
 cd build
-cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_GTEST=ON
+cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cp compile_commands.json ..

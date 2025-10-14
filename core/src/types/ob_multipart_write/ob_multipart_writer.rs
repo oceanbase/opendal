@@ -16,7 +16,7 @@
 // under the License.
 
 use std::sync::Arc;
-
+use tokio::sync::Mutex;
 use bytes::Buf;
 
 use crate::raw::*;
@@ -27,8 +27,8 @@ pub struct ObMultipartWriter {
     /// Keep a reference to write context in writer.
     _ctx: Arc<ObMultipartWriteContext>,
     inner: ObMultipartWriteGenerator<oio::ObMultipartWriter>,
+    parts: Arc<Mutex<Vec<oio::MultipartPart>>>,
 }
-
 
 impl ObMultipartWriter {
     ///
@@ -36,7 +36,11 @@ impl ObMultipartWriter {
         let ctx = Arc::new(ctx);
         let inner = ObMultipartWriteGenerator::create(ctx.clone()).await?;
 
-        Ok(Self { _ctx: ctx, inner })
+        Ok(Self {
+            _ctx: ctx,
+            inner,
+            parts: Arc::new(Mutex::new(Vec::new())),
+        })
     }
 
     ///
@@ -50,11 +54,9 @@ impl ObMultipartWriter {
         bs: impl Into<Buffer>,
         part_id: usize,
     ) -> Result<()> {
-        let mut bs = bs.into();
-        while !bs.is_empty() {
-            let n = self.inner.write_with_part_id(bs.clone(), part_id).await?;
-            bs.advance(n);
-        }
+        let bs = bs.into();
+        let part = self.inner.write_with_part_id(bs, part_id).await?;
+        self.parts.lock().await.push(part);
 
         Ok(())
     }
@@ -73,6 +75,10 @@ impl ObMultipartWriter {
 
     ///
     pub async fn close(&mut self) -> Result<()> {
-        self.inner.close().await
+        let parts = {
+            let mut guard = self.parts.lock().await;
+            std::mem::take(&mut *guard)
+        };
+        self.inner.close(parts).await
     }
 }

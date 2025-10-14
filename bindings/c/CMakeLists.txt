@@ -25,7 +25,6 @@ endif()
 option(TEST_ENABLE_ASAN "Enable AddressSanitizer for tests" OFF)
 
 # Disabled by default, it can be enabled with -DUSE_GTEST=ON
-option(USE_GTEST "Enable building and running Google Test unit tests." OFF)
 
 # force the compiler to support these standards
 set(CMAKE_C_STANDARD 11)
@@ -87,7 +86,6 @@ add_dependencies(opendal_c_shared cargo_build)
 add_executable(error_handle examples/error_handle.c)
 target_link_libraries(error_handle opendal_c_shared)
 
-if (USE_GTEST)
     # include(FetchContent)
     # set(GOOGLETEST_VERSION 1.8.0)
     # FetchContent_Declare(
@@ -113,12 +111,27 @@ if (USE_GTEST)
     target_link_options(obdal_test PRIVATE -rdynamic)
     message(STATUS "Linking with: ${stdcxx_shared}")
 
+    add_executable(obdal_async_test tests/obdal_test.h tests/obdal_async_test.cpp)
+    target_link_libraries(obdal_async_test PRIVATE opendal_c_shared gtest gmock -lpthread -ldl)
+    target_link_libraries(obdal_async_test PRIVATE ${stdcxx_shared})
+    target_link_options(obdal_async_test PRIVATE -rdynamic)
+    message(STATUS "Linking with: ${stdcxx_shared}")
+
+    add_executable(obdal_retry_test tests/obdal_retry_test.cpp)
+    target_link_libraries(obdal_retry_test PRIVATE opendal_c_shared gtest gmock -lpthread -ldl)
+    target_link_libraries(obdal_retry_test PRIVATE ${stdcxx_shared})
+    target_link_options(obdal_retry_test PRIVATE -rdynamic)
+    message(STATUS "Linking with: ${stdcxx_shared}")
+
     if (TEST_ENABLE_ASAN)
         # target_compile_options(tests PRIVATE -fsanitize=address)
         # target_link_options(tests PRIVATE -fsanitize=address)
 
         target_compile_options(obdal_test PRIVATE -fsanitize=address)
         target_link_options(obdal_test PRIVATE -fsanitize=address)
+
+        target_compile_options(obdal_async_test PRIVATE -fsanitize=address)
+        target_link_options(obdal_async_test PRIVATE -fsanitize=address)
     endif()
 
     # 设置 RPATH
@@ -126,7 +139,6 @@ if (USE_GTEST)
         BUILD_RPATH ${TOOL_DIR}/lib64/
         INSTALL_RPATH ${TOOL_DIR}/lib64/
     )
-endif()
 
 install(
     FILES ${OPENDAL_STATIC_LIB}

@@ -490,6 +490,18 @@ impl<T: oio::BlockingWrite> oio::BlockingWrite for ErrorContextWrapper<T> {
     }
 }
 
+impl<T: oio::ObMultipartWrite> Clone for ErrorContextWrapper<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            scheme: self.scheme.clone(),
+            path: self.path.clone(),
+            range: self.range.clone(),
+            processed: self.processed,
+        }
+    }
+}
+
 impl<T: oio::ObMultipartWrite> oio::ObMultipartWrite for ErrorContextWrapper<T> {
     async fn initiate_part(&mut self) -> Result<()> {
         self.inner
@@ -502,13 +514,14 @@ impl<T: oio::ObMultipartWrite> oio::ObMultipartWrite for ErrorContextWrapper<T> 
             })
     }
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let size = bs.len();
         self.inner
             .write_with_part_id(bs, part_id)
             .await
-            .map(|_| {
+            .map(|ret| {
                 self.processed += size as u64;
+                ret
             })
             .map_err(|err| {
                 err.with_operation(Operation::ObMultiPartWriterWriteWithPartId)
@@ -519,8 +532,8 @@ impl<T: oio::ObMultipartWrite> oio::ObMultipartWrite for ErrorContextWrapper<T> 
             })
     }
 
-    async fn close(&mut self) -> Result<()> {
-        self.inner.close().await.map_err(|err| {
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.inner.close(parts).await.map_err(|err| {
             err.with_operation(Operation::ObMultipartWriterClose)
                 .with_context("service", self.scheme)
                 .with_context("path", &self.path)
@@ -549,12 +562,13 @@ impl<T: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for ErrorCo
             })
     }
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let size = bs.len();
         self.inner
             .write_with_part_id(bs, part_id)
-            .map(|_| {
+            .map(|ret| {
                 self.processed += size as u64;
+                ret
             })
             .map_err(|err| {
                 err.with_operation(Operation::BlockingObMultiPartWriterWriteWithPartId)
@@ -565,8 +579,8 @@ impl<T: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for ErrorCo
             })
     }
 
-    fn close(&mut self) -> Result<()> {
-        self.inner.close().map_err(|err| {
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.inner.close(parts).map_err(|err| {
             err.with_operation(Operation::BlockingObMultipartWriterClose)
                 .with_context("service", self.scheme)
                 .with_context("path", &self.path)

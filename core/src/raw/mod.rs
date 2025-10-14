@@ -87,3 +87,4 @@ pub mod adapters;
 pub mod oio;
 #[cfg(feature = "tests")]
 pub mod tests;
+pub mod retry;

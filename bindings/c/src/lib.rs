@@ -51,6 +51,11 @@ pub use metadata::opendal_metadata;
 
 mod operator;
 pub use operator::opendal_operator;
+mod async_operator;
+pub use async_operator::opendal_async_operator;
+
+mod async_multipart_writer;
+pub use async_multipart_writer::opendal_async_multipart_writer;
 
 mod operator_info;
 

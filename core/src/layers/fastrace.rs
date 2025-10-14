@@ -124,6 +124,8 @@ impl<A: Access> LayeredAccess for FastraceAccessor<A> {
     type BlockingReader = FastraceWrapper<A::BlockingReader>;
     type Writer = FastraceWrapper<A::Writer>;
     type BlockingWriter = FastraceWrapper<A::BlockingWriter>;
+    type ObMultipartWriter = FastraceWrapper<A::ObMultipartWriter>;
+    type BlockingObMultipartWriter = FastraceWrapper<A::BlockingObMultipartWriter>;
     type Lister = FastraceWrapper<A::Lister>;
     type BlockingLister = FastraceWrapper<A::BlockingLister>;
     type Deleter = FastraceWrapper<A::Deleter>;
@@ -163,6 +165,19 @@ impl<A: Access> LayeredAccess for FastraceAccessor<A> {
                 rp,
                 FastraceWrapper::new(
                     Span::enter_with_local_parent(Operation::Write.into_static()),
+                    r,
+                ),
+            )
+        })
+    }
+
+    #[trace(properties = { "path": "{path:?}" })]
+    async fn ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::ObMultipartWriter)> {
+        self.inner.ob_multipart_write(path, args).await.map(|(rp, r)| {
+            (
+                rp,
+                FastraceWrapper::new(
+                    Span::enter_with_local_parent(Operation::ObMultipartWrite.into_static()),
                     r,
                 ),
             )
@@ -247,6 +262,16 @@ impl<A: Access> LayeredAccess for FastraceAccessor<A> {
     }
 
     #[trace]
+    fn blocking_ob_multipart_write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::BlockingObMultipartWriter)> {
+        self.inner.blocking_ob_multipart_write(path, args).map(|(rp, r)| {
+            (
+                rp,
+                FastraceWrapper::new(Span::enter_with_local_parent(Operation::BlockingObMultipartWrite.into_static()), r),
+            )
+        })
+    }
+
+    #[trace]
     fn blocking_copy(&self, from: &str, to: &str, args: OpCopy) -> Result<RpCopy> {
         self.inner().blocking_copy(from, to, args)
     }
@@ -321,6 +346,12 @@ impl<R: oio::Write> oio::Write for FastraceWrapper<R> {
         self.inner.write(bs)
     }
 
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> impl Future<Output = Result<()>> + MaybeSend {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::WriterWithOffset.into_static());
+        self.inner.write_with_offset(offset, bs)
+    }
+
     fn abort(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
         let _g = self.span.set_local_parent();
         let _span = LocalSpan::enter_with_local_parent(Operation::WriterAbort.into_static());
@@ -334,12 +365,76 @@ impl<R: oio::Write> oio::Write for FastraceWrapper<R> {
     }
 }
 
+impl<R: oio::ObMultipartWrite + Clone> Clone for FastraceWrapper<R> {
+    fn clone(&self) -> Self {
+        Self { span: Span::enter_with_local_parent("FastraceWrapper ObMultipartWriter Clone"), inner: self.inner.clone() }
+    }
+}
+
+impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for FastraceWrapper<R> {
+    fn initiate_part(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::ObMultipartWriterInitiatePart.into_static());
+        self.inner.initiate_part()
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<oio::MultipartPart>> + MaybeSend {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::ObMultiPartWriterWriteWithPartId.into_static());
+        self.inner.write_with_part_id(bs, part_id)
+    }
+
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> impl Future<Output = Result<()>> + MaybeSend {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::ObMultipartWriterClose.into_static());
+        self.inner.close(parts)
+    }
+
+    fn abort(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::ObMultipartWriterAbort.into_static());
+        self.inner.abort()
+    }
+}
+
+impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for FastraceWrapper<R> {
+    fn initiate_part(&mut self) -> Result<()> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::BlockingObMultipartWriterInitiatePart.into_static());
+        self.inner.initiate_part()
+    }
+
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::BlockingObMultiPartWriterWriteWithPartId.into_static());
+        self.inner.write_with_part_id(bs, part_id)
+    }
+
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::BlockingObMultipartWriterClose.into_static());
+        self.inner.close(parts)
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::BlockingObMultipartWriterAbort.into_static());
+        self.inner.abort()
+    }
+}
+
 impl<R: oio::BlockingWrite> oio::BlockingWrite for FastraceWrapper<R> {
     fn write(&mut self, bs: Buffer) -> Result<()> {
         let _g = self.span.set_local_parent();
         let _span =
             LocalSpan::enter_with_local_parent(Operation::BlockingWriterWrite.into_static());
         self.inner.write(bs)
+    }
+
+    fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::BlockingWriterWithOffset.into_static());
+        self.inner.write_with_offset(offset, bs)
     }
 
     fn close(&mut self) -> Result<()> {
@@ -375,6 +470,12 @@ impl<R: oio::Delete> oio::Delete for FastraceWrapper<R> {
     #[trace(enter_on_poll = true)]
     async fn flush(&mut self) -> Result<usize> {
         self.inner.flush().await
+    }
+
+    fn deleted(&mut self, path: &str, args: OpDelete) -> Result<bool> {
+        let _g = self.span.set_local_parent();
+        let _span = LocalSpan::enter_with_local_parent(Operation::DeleterDeleted.into_static());
+        self.inner.deleted(path, args)
     }
 }
 

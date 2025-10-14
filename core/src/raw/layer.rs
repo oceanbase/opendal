@@ -143,7 +143,7 @@ pub trait LayeredAccess: Send + Sync + Debug + Unpin + 'static {
 
     type Reader: oio::Read;
     type Writer: oio::Write;
-    type ObMultipartWriter: oio::ObMultipartWrite;
+    type ObMultipartWriter: oio::ObMultipartWrite + Clone;
     type Lister: oio::List;
     type Deleter: oio::Delete;
     type BlockingReader: oio::BlockingRead;

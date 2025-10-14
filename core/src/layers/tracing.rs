@@ -385,6 +385,15 @@ impl<R: oio::BlockingWrite> oio::BlockingWrite for TracingWrapper<R> {
     }
 }
 
+impl<R: oio::ObMultipartWrite> Clone for TracingWrapper<R> {
+    fn clone(&self) -> Self {
+        Self {
+            span: self.span.clone(),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TracingWrapper<R> {
     #[tracing::instrument(
         parent = &self.span,
@@ -398,7 +407,7 @@ impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TracingWrapper<R> {
         parent = &self.span,
         level = "trace",
         skip_all)]
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<()>> + MaybeSend {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> impl Future<Output = Result<oio::MultipartPart>> + MaybeSend {
         self.inner.write_with_part_id(bs, part_id)
     }
 
@@ -406,8 +415,8 @@ impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for TracingWrapper<R> {
         parent = &self.span,
         level = "trace",
         skip_all)]
-    fn close(&mut self) -> impl Future<Output = Result<()>> + MaybeSend {
-        self.inner.close()
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> impl Future<Output = Result<()>> + MaybeSend {
+        self.inner.close(parts)
     }
 
     #[tracing::instrument(
@@ -432,7 +441,7 @@ impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for Tracing
         parent = &self.span,
         level = "trace",
         skip_all)]
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         self.inner.write_with_part_id(bs, part_id)
     }
 
@@ -440,8 +449,8 @@ impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for Tracing
         parent = &self.span,
         level = "trace",
         skip_all)]
-    fn close(&mut self) -> Result<()> {
-        self.inner.close()
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.inner.close(parts)
     }
 
     #[tracing::instrument(

@@ -88,14 +88,12 @@ impl ObMultipartWriteGenerator<oio::ObMultipartWriter> {
         self.w.initiate_part().await
     }
 
-    pub async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<usize> {
-        let size = bs.len();
-        self.w.write_with_part_id(bs, part_id).await?;
-        return Ok(size)
+    pub async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
+        self.w.write_with_part_id(bs, part_id).await
     }
 
-    pub async fn close(&mut self) -> Result<()> {
-        self.w.close().await
+    pub async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.w.close(parts).await
     }
 
     pub async fn abort(&mut self) -> Result<()> {
@@ -117,14 +115,12 @@ impl ObMultipartWriteGenerator<oio::BlockingObMultipartWriter> {
         self.w.initiate_part()
     }
 
-    pub fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<usize> {
-        let size = bs.len();
-        self.w.write_with_part_id(bs, part_id)?;
-        Ok(size)
+    pub fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
+        self.w.write_with_part_id(bs, part_id)
     }
 
-    pub fn close(&mut self) -> Result<()> {
-        self.w.close()
+    pub fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.w.close(parts)
     }
 
     pub fn abort(&mut self) -> Result<()> {

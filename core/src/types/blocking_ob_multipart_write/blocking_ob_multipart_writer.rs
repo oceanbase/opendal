@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use bytes::Buf;
+use std::sync::Mutex;
 
 use crate::raw::*;
 use crate::*;
@@ -27,6 +28,7 @@ pub struct BlockingObMultipartWriter {
     /// Keep a reference to write context in writer.
     _ctx: Arc<ObMultipartWriteContext>,
     inner: ObMultipartWriteGenerator<oio::BlockingObMultipartWriter>,
+    parts: Arc<Mutex<Vec<oio::MultipartPart>>>,
 }
 
 
@@ -36,7 +38,7 @@ impl BlockingObMultipartWriter {
         let ctx = Arc::new(ctx);
         let inner = ObMultipartWriteGenerator::blocking_create(ctx.clone())?;
 
-        Ok(Self { _ctx: ctx, inner })
+        Ok(Self { _ctx: ctx, inner, parts: Arc::new(Mutex::new(Vec::new())) })
     }
 
     ///
@@ -50,10 +52,11 @@ impl BlockingObMultipartWriter {
         bs: impl Into<Buffer>,
         part_id: usize,
     ) -> Result<()> {
-        let mut bs = bs.into();
-        while !bs.is_empty() {
-            let n = self.inner.write_with_part_id(bs.clone(), part_id)?;
-            bs.advance(n);
+        let bs = bs.into();
+        let part = self.inner.write_with_part_id(bs.clone(), part_id)?;
+        {
+            let mut guard = self.parts.lock().unwrap();
+            guard.push(part);
         }
 
         Ok(())
@@ -73,6 +76,7 @@ impl BlockingObMultipartWriter {
 
     ///
     pub fn close(&mut self) -> Result<()> {
-        self.inner.close()
+        let parts = self.parts.lock().unwrap();
+        self.inner.close(parts.clone())
     }
 }

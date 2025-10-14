@@ -660,7 +660,7 @@ impl Access for OssBackend {
             PresignOperation::Read(v) => self.core.oss_get_object_request(path, true, v)?,
             PresignOperation::Write(v) => {
                 self.core
-                    .oss_put_object_request(path, None, v, Buffer::new(), true)?
+                    .oss_put_object_request(path, None, v, Buffer::new(), true).await?
             }
         };
 

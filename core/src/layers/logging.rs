@@ -1336,6 +1336,18 @@ impl<W: oio::BlockingWrite, I: LoggingInterceptor> oio::BlockingWrite for Loggin
     }
 }
 
+impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> Clone for LoggingWriter<W, I> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            logger: self.logger.clone(),
+            info: self.info.clone(),
+            path: self.path.clone(),
+            written: self.written,
+        }
+    }
+}
+
 impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for LoggingWriter<W, I> {
     async fn initiate_part(&mut self) -> Result<()> {
         self.logger.log(
@@ -1375,7 +1387,7 @@ impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for 
         }
     }
     
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let size = bs.len();
         self.logger.log(
             &self.info,
@@ -1390,7 +1402,7 @@ impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for 
         );
 
         match self.inner.write_with_part_id(bs, part_id).await {
-            Ok(_) => {
+            Ok(ret) => {
                 self.logger.log(
                     &self.info,
                     Operation::ObMultiPartWriterWriteWithPartId,
@@ -1402,7 +1414,7 @@ impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for 
                     "succeeded",
                     None,
                 );
-                Ok(())
+                Ok(ret)
             }
             Err(err) => {
                 self.logger.log(
@@ -1421,7 +1433,7 @@ impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for 
         }
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
         self.logger.log(
             &self.info,
             Operation::ObMultipartWriterClose,
@@ -1433,7 +1445,7 @@ impl<W: oio::ObMultipartWrite, I: LoggingInterceptor> oio::ObMultipartWrite for 
             None,
         );
 
-        match self.inner.close().await {
+        match self.inner.close(parts).await {
             Ok(_) => {
                 self.logger.log(
                     &self.info,
@@ -1545,7 +1557,7 @@ impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMul
         }
     }
     
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         let size = bs.len();
         self.logger.log(
             &self.info,
@@ -1560,7 +1572,7 @@ impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMul
         );
 
         match self.inner.write_with_part_id(bs, part_id) {
-            Ok(_) => {
+            Ok(ret) => {
                 self.logger.log(
                     &self.info,
                     Operation::BlockingObMultiPartWriterWriteWithPartId,
@@ -1572,7 +1584,7 @@ impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMul
                     "succeeded",
                     None,
                 );
-                Ok(())
+                Ok(ret)
             }
             Err(err) => {
                 self.logger.log(
@@ -1591,7 +1603,7 @@ impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMul
         }
     }
 
-    fn close(&mut self) -> Result<()> {
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
         self.logger.log(
             &self.info,
             Operation::BlockingObMultipartWriterClose,
@@ -1603,7 +1615,7 @@ impl<W: oio::BlockingObMultipartWrite, I: LoggingInterceptor> oio::BlockingObMul
             None,
         );
 
-        match self.inner.close() {
+        match self.inner.close(parts) {
             Ok(_) => {
                 self.logger.log(
                     &self.info,

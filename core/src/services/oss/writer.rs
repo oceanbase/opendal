@@ -48,7 +48,7 @@ impl oio::MultipartWrite for OssWriter {
     async fn write_once(&self, size: u64, body: Buffer) -> Result<()> {
         let mut req =
             self.core
-                .oss_put_object_request(&self.path, Some(size), &self.op, body, false)?;
+                .oss_put_object_request(&self.path, Some(size), &self.op, body, false).await?;
 
         self.core.sign(&mut req).await?;
 
@@ -192,7 +192,7 @@ impl oio::AppendWrite for OssWriter {
     async fn append(&self, offset: u64, size: u64, body: Buffer) -> Result<()> {
         let mut req = self
             .core
-            .oss_append_object_request(&self.path, offset, size, &self.op, body)?;
+            .oss_append_object_request(&self.path, offset, size, &self.op, body).await?;
 
         self.core.sign(&mut req).await?;
 

@@ -50,10 +50,8 @@ if [[ "${ID}"x != "alinux"x ]]; then
     dep_pkgs=(
         obdevtools-cmake-3.22.1-22022100417.el
         obdevtools-gcc9-9.3.0-52022092914.el
+        devdeps-gtest-1.8.0-132022101316.el
     )
-    if [[ -n "$BUILD_ENV" ]]; then
-        dep_pkgs+=("devdeps-gtest-1.8.0-132022101316.el")
-    fi
     echo ${dep_pkgs[@]}
 
     for dep in ${dep_pkgs[@]}
@@ -100,7 +98,7 @@ if [[ -n "$BUILD_ENV" ]]; then
     rm -rf build
     mkdir build 
     cd build
-    cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_GTEST=ON
+    cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
     cp compile_commands.json ..
 else
     # build rpm

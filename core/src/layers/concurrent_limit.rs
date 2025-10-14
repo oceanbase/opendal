@@ -331,12 +331,12 @@ impl<R: oio::ObMultipartWrite> oio::ObMultipartWrite for ConcurrentLimitWrapper<
         self.inner.initiate_part().await
     }
 
-    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    async fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         self.inner.write_with_part_id(bs, part_id).await
     }
 
-    async fn close(&mut self) -> Result<()> {
-        self.inner.close().await
+    async fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.inner.close(parts).await
     }
     
     async fn abort(&mut self) -> Result<()> {
@@ -349,12 +349,12 @@ impl<R: oio::BlockingObMultipartWrite> oio::BlockingObMultipartWrite for Concurr
         self.inner.initiate_part()
     }
 
-    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<()> {
+    fn write_with_part_id(&mut self, bs: Buffer, part_id: usize) -> Result<oio::MultipartPart> {
         self.inner.write_with_part_id(bs, part_id)
     }
 
-    fn close(&mut self) -> Result<()> {
-        self.inner.close()
+    fn close(&mut self, parts: Vec<oio::MultipartPart>) -> Result<()> {
+        self.inner.close(parts)
     }
 
     fn abort(&mut self) -> Result<()> {
