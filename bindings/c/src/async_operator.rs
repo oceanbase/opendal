@@ -251,7 +251,7 @@ pub unsafe extern "C" fn opendal_async_operator_read(
             async move {
                 let ret = op.deref().read_with(path).range(range).await;
                 match ret {
-                    Ok(buffer) => {
+                    Ok(mut buffer) => {
                         let read_len = buffer.len();
                         if read_len > len {
                             callback_clone(
@@ -265,12 +265,8 @@ pub unsafe extern "C" fn opendal_async_operator_read(
                             return;
                         }
                         unsafe {
-                            let bytes = buffer.to_bytes();
-                            std::ptr::copy_nonoverlapping(
-                                bytes.as_ptr(),
-                                buf_clone as *mut u8,
-                                read_len,
-                            );
+                            use bytes::Buf;
+                            buffer.copy_to_slice(std::slice::from_raw_parts_mut(buf_clone as *mut u8, read_len));
                         }
                         callback_clone(
                             std::ptr::null_mut(),

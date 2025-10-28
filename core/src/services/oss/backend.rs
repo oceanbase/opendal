@@ -312,6 +312,15 @@ impl OssBuilder {
 
         self
     }
+
+    /// Set session_token for this backend.
+    pub fn session_token(mut self, session_token: &str) -> Self {
+        if !session_token.is_empty() {
+            self.config.session_token = Some(session_token.to_string())
+        }
+
+        self
+    }
 }
 
 impl Builder for OssBuilder {
@@ -393,6 +402,10 @@ impl Builder for OssBuilder {
 
         if let Some(v) = self.config.sts_endpoint {
             cfg.sts_endpoint = Some(v);
+        }
+
+        if let Some(v) = self.config.session_token {
+            cfg.security_token = Some(v);
         }
 
         let checksum_algorithm = match self.config.checksum_algorithm.as_deref() {

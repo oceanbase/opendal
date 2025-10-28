@@ -1372,7 +1372,7 @@ mod tests {
             Ok(())
         }
 
-        async fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<()> {
+        async fn write_with_part_id(&mut self, _: Buffer, _: usize) -> Result<oio::MultipartPart> {
             Err(Error::new(ErrorKind::Unexpected, "always close failed").set_temporary())
         }
 
@@ -1380,7 +1380,7 @@ mod tests {
             Ok(())
         }
         
-        async fn close(&mut self) -> Result<()> {
+        async fn close(&mut self, _: Vec<oio::MultipartPart>) -> Result<()> {
             Ok(())
         }
     }

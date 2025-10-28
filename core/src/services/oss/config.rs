@@ -80,6 +80,8 @@ pub struct OssConfig {
     /// Available options:
     /// - "md5"
     pub checksum_algorithm: Option<String>,
+    /// session_token for this backend.
+    pub session_token: Option<String>,
 }
 
 impl Debug for OssConfig {
