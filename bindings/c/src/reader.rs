@@ -74,7 +74,7 @@ impl opendal_reader {
     
             let range = (offset as u64)..((offset + len) as u64);
             match self.deref_mut().read(range) {
-                Ok(buffer) => {
+                Ok(mut buffer) => {
                     let read_len = buffer.len();
                     if read_len > len {
                         return opendal_result_reader_read {
@@ -89,8 +89,8 @@ impl opendal_reader {
                     }
     
                     unsafe {
-                        let bytes = buffer.to_bytes();
-                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, read_len);
+                        use bytes::Buf;
+                        buffer.copy_to_slice(std::slice::from_raw_parts_mut(buf, read_len));
                     }
                     opendal_result_reader_read {
                         size: read_len,

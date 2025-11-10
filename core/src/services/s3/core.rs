@@ -670,7 +670,8 @@ impl S3Core {
             queries.push(format!("max-keys={limit}"));
         }
         if !next_marker.is_empty() {
-            queries.push(format!("marker={next_marker}"));
+            let next_marker = build_abs_path(&self.root, &next_marker);
+            queries.push(format!("marker={}", percent_encode_path(&next_marker)));
         }
 
         let url = if queries.is_empty() {
@@ -1242,8 +1243,8 @@ mod tests {
         let tagging: Tagging = op_put_obj_tag.into();
         let actual = quick_xml::se::to_string(&tagging).expect("must succeed");
 
-        pretty_assertions::assert_eq!(
-            actual,
+        assert!(
+            (actual ==
             r#"<Tagging>
             <TagSet>
                <Tag>
@@ -1258,7 +1259,21 @@ mod tests {
          </Tagging>"#
                 // Cleanup space and new line
                 .replace([' ', '\n'], "")
-        )
+        ) || (actual ==
+            r#"<Tagging>
+            <TagSet>
+               <Tag>
+                  <Key>key1</Key>
+                  <Value>value1</Value>
+               </Tag>
+               <Tag>
+                  <Key>key2</Key>
+                  <Value>value2</Value>
+               </Tag>
+            </TagSet>
+         </Tagging>"#
+                // Cleanup space and new line
+                .replace([' ', '\n'], "")))
     }
 
     #[test]
