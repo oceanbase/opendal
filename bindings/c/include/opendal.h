@@ -104,6 +104,11 @@ typedef enum opendal_code {
    * oss append write offset not equal to length
    */
   OPENDAL_PWRITE_OFFSET_NOT_MATCH,
+  /**
+   * object locked by worm
+   */
+  OPENDAL_FILE_IMMUTABLE,
+  OPENDAL_OVERWRITE_CONTENT_MISMATCH,
 } opendal_code;
 
 /**
@@ -829,6 +834,12 @@ struct opendal_error *opendal_init_env(void *alloc,
 void opendal_fin_env(void);
 
 /**
+ * \brief calc md5
+ * please free the memory after using it
+ */
+char *opendal_calc_md5(const uint8_t *buf, uintptr_t buf_len);
+
+/**
  * \brief Frees the opendal_error, ok to call on NULL
  */
 void opendal_error_free(struct opendal_error *ptr);
@@ -889,6 +900,11 @@ void opendal_metadata_free(struct opendal_metadata *ptr);
  * ```
  */
 uint64_t opendal_metadata_content_length(const struct opendal_metadata *self);
+
+/**
+ * \brief Return the content_md5 of the metadata
+ */
+char *opendal_metadata_content_md5(const struct opendal_metadata *self);
 
 /**
  * \brief Return whether the path represents a file
@@ -1650,6 +1666,12 @@ void opendal_async_operator_write_with_if_match(const struct opendal_async_opera
                                                 const struct opendal_bytes *bytes,
                                                 OpenDalAsyncCallbackFn callback,
                                                 void *ctx);
+
+void opendal_async_operator_write_with_worm_check(const struct opendal_async_operator *op,
+                                                  const char *path,
+                                                  const struct opendal_bytes *bytes,
+                                                  OpenDalAsyncCallbackFn callback,
+                                                  void *ctx);
 
 struct opendal_error *opendal_async_operator_multipart_writer(const struct opendal_async_operator *op,
                                                               const char *path,

@@ -367,6 +367,73 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_if_match(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn opendal_async_operator_write_with_worm_check(
+    op: &'static opendal_async_operator,
+    path: *const c_char,
+    bytes: &opendal_bytes,
+    callback: OpenDalAsyncCallbackFn,
+    ctx: *mut c_void,
+) {
+    let err = obdal_catch_unwind(|| {
+        let _guard = ThreadTenantIdGuard::new(op.tenant_id);
+        let path = match c_char_to_str(path) {
+            Ok(valid_str) => valid_str,
+            Err(e) => return e,
+        };
+
+        let buffer = Buffer::from(bytes);
+        let callback_clone = callback.clone();
+        let ctx_clone = ctx as usize;
+        obdal_spawn(
+            async move {
+                let buffer_clone = buffer.clone();
+                let length = buffer.len() as i64;
+                let mut ret = op.deref().write(path, buffer).await;
+                if let Err(e) = &ret {
+                    if e.kind() == core::ErrorKind::FileImmutable {
+                        let new_ret = match op.deref().stat(path).await {
+                            Ok(stat) => {
+                                if let Some(content_md5) = stat.content_md5() {
+                                    let md5 = calc_buffer_md5(&buffer_clone.to_bytes());
+                                    if md5 == content_md5 {
+                                        Ok(())
+                                    } else {
+                                        Err(core::Error::new(core::ErrorKind::OverwriteContentMismatch, "worm locked and content md5 not equals")
+                                            .with_context("path", path)
+                                            .with_context("write content md5", &md5)
+                                            .with_context("read content md5", content_md5)
+                                        )
+                                    }
+                                } else {
+                                    Err(core::Error::new(core::ErrorKind::Unexpected, "content md5 is None").with_context("path", path))
+                                }
+                            }
+                            Err(e) => Err(e),
+                        };
+
+                        ret = new_ret;
+                    }
+                }
+                match ret {
+                    Ok(_) => {
+                        callback_clone(std::ptr::null_mut(), length, ctx_clone as *mut c_void);
+                    }
+                    Err(e) => {
+                        callback_clone(opendal_error::new(e), 0, ctx_clone as *mut c_void);
+                    }
+                }
+            },
+            op.tenant_id,
+        );
+        std::ptr::null_mut()
+    }).map_or_else(|err| err, |ret| ret);
+
+    if !err.is_null() {
+        callback(err, 0, ctx);
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn opendal_async_operator_multipart_writer(
     op: &opendal_async_operator,
     path: *const c_char,

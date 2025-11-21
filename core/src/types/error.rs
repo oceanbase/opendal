@@ -99,6 +99,10 @@ pub enum ErrorKind {
     ChecksumUnsupported,
     /// oss append write offset not equal to length
     PwriteOffsetNotMatch,
+    /// object locked by worm
+    FileImmutable,
+    /// overwrite content mismatch, used for worm check
+    OverwriteContentMismatch
 }
 
 impl ErrorKind {
@@ -135,6 +139,8 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::TimedOut => "TimedOut",
             ErrorKind::ChecksumUnsupported => "ChecksumUnsupported",
             ErrorKind::PwriteOffsetNotMatch => "PwriteOffsetNotMatch",
+            ErrorKind::FileImmutable => "FileImmutable",
+            ErrorKind::OverwriteContentMismatch => "OverwriteContentMismatch",
         }
     }
 }

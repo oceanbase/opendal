@@ -64,7 +64,7 @@ protected:
       opendal_operator_options_set(options, "disable_config_load", "true");
       opendal_operator_options_set(options, "disable_ec2_metadata", "true");
       opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-      opendal_operator_options_set(options, "checksum_algorithm", "crc32");
+      opendal_operator_options_set(options, "checksum_algorithm", "md5");
     } else if (type_ == OSS) {
       opendal_operator_options_set(options, "bucket", bucket);
       opendal_operator_options_set(options, "endpoint", endpoint);

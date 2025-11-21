@@ -22,6 +22,7 @@ use std::ffi::{c_char, c_void, CString};
 use std::fmt::Write;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::slice::from_raw_parts;
 use std::sync::Once;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -37,6 +38,9 @@ use tracing_subscriber::{
     registry::LookupSpan,
     util::SubscriberInitExt,
 };
+use md5::{Md5, Digest};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 
 use super::*;
 use ::opendal as core;
@@ -397,6 +401,37 @@ pub extern "C" fn opendal_fin_env() {
         // are only released when the thread exits, preventing malloc and free from being unlinked.
         // ALLOC_FN = None;
         // FREE_FN = None;
+    }
+}
+
+/// \brief calc md5, return the rust String
+pub fn calc_buffer_md5(buf: &[u8]) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(buf);
+    let digest = hasher.finalize();
+    BASE64_STANDARD.encode(digest)
+}
+
+/// \brief calc md5
+/// please free the memory after using it
+#[no_mangle]
+pub unsafe extern "C" fn opendal_calc_md5(buf: *const u8, buf_len: usize) -> *mut c_char {
+    let ret = obdal_catch_unwind(|| {
+        if buf.is_null() {
+            tracing::warn!("invalid args: buf is null");
+            return std::ptr::null_mut();
+        }
+        let buf = unsafe { std::slice::from_raw_parts(buf, buf_len) };
+        let md5 = calc_buffer_md5(&buf);
+        CString::new(md5).unwrap().into_raw()
+    });
+    match ret {
+        Ok(ret) => ret,
+        Err(err) => {
+            tracing::warn!("opendal calc md5 error: {}", *err);
+            opendal_error::opendal_error_free(err);
+            std::ptr::null_mut()
+        }
     }
 }
 

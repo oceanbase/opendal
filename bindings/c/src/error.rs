@@ -63,6 +63,9 @@ pub enum opendal_code {
     OPENDAL_CHECKSUM_UNSUPPORTED,
     /// oss append write offset not equal to length
     OPENDAL_PWRITE_OFFSET_NOT_MATCH,
+    /// object locked by worm
+    OPENDAL_FILE_IMMUTABLE,
+    OPENDAL_OVERWRITE_CONTENT_MISMATCH,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -86,6 +89,8 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::TimedOut => opendal_code::OPENDAL_TIMED_OUT,
             core::ErrorKind::ChecksumUnsupported => opendal_code::OPENDAL_CHECKSUM_UNSUPPORTED,
             core::ErrorKind::PwriteOffsetNotMatch => opendal_code::OPENDAL_PWRITE_OFFSET_NOT_MATCH,
+            core::ErrorKind::FileImmutable => opendal_code::OPENDAL_FILE_IMMUTABLE,
+            core::ErrorKind::OverwriteContentMismatch => opendal_code::OPENDAL_OVERWRITE_CONTENT_MISMATCH,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
