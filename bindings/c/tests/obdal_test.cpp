@@ -19,8 +19,9 @@
 
 #include "obdal_test.h" 
 
-TEST_F(ObDalTest, test_multi_init)
-{
+std::string ObDalTest::base_path_ = "";
+
+TEST_F(ObDalTest, test_multi_init) {
   opendal_fin_env();
 
   opendal_error *error = opendal_init_env(
@@ -28,7 +29,7 @@ TEST_F(ObDalTest, test_multi_init)
       reinterpret_cast<void *>(my_free),
       reinterpret_cast<void *>(ob_log_handler),
       6,  // LevelFilter::TRACE,
-      32, // work thread count 
+      32, // work thread count
       32, // max blocking thread count
       10,  
       97, // max client count
@@ -332,37 +333,48 @@ TEST_F(ObDalTest, test_list)
   }
 }
 
-TEST_F(ObDalTest, test_wrong_endpoint)
-{
-  std::string test_wrong_endpoint = "aa." + std::string(endpoint);
+TEST_F(ObDalTest, test_wrong_endpoint) {
+  const TestConfig &cfg = test_config_instance();
+  std::string test_wrong_endpoint = "aa." + cfg.endpoint_;
   opendal_operator_options *options = opendal_operator_options_new();
 
   if (type_ == S3) {
-    opendal_operator_options_set(options, "bucket", bucket);
-    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "region", region);
-    opendal_operator_options_set(options, "access_key_id", access_key_id);
-    opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+    opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
+    opendal_operator_options_set(options, "endpoint",
+                                 test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "region", cfg.region_.c_str());
+    opendal_operator_options_set(options, "access_key_id",
+                                 cfg.access_key_id_.c_str());
+    opendal_operator_options_set(options, "secret_access_key",
+                                 cfg.secret_access_key_.c_str());
     opendal_operator_options_set(options, "disable_config_load", "true");
     opendal_operator_options_set(options, "disable_ec2_metadata", "true");
     opendal_operator_options_set(options, "enable_virtual_host_style", "true");
   } else if (type_ == OSS) {
-    opendal_operator_options_set(options, "bucket", bucket);
-    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "access_key_id", access_key_id);
-    opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+    opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
+    opendal_operator_options_set(options, "endpoint",
+                                 test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "access_key_id",
+                                 cfg.access_key_id_.c_str());
+    opendal_operator_options_set(options, "access_key_secret",
+                                 cfg.secret_access_key_.c_str());
   } else if (type_ == AZBLOB) {
-    opendal_operator_options_set(options, "container", bucket);
-    test_wrong_endpoint = std::string(endpoint);
+    opendal_operator_options_set(options, "container", cfg.bucket_.c_str());
+    test_wrong_endpoint = cfg.endpoint_;
     int pos = test_wrong_endpoint.find("://") + 3;
     ASSERT_TRUE(pos < test_wrong_endpoint.length());
-    test_wrong_endpoint = test_wrong_endpoint.substr(0, pos) + "aa." + test_wrong_endpoint.substr(pos);
-    opendal_operator_options_set(options, "endpoint", test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "account_name", access_key_id);
-    opendal_operator_options_set(options, "account_key", secret_access_key);
+    test_wrong_endpoint = test_wrong_endpoint.substr(0, pos) + "aa." +
+                          test_wrong_endpoint.substr(pos);
+    opendal_operator_options_set(options, "endpoint",
+                                 test_wrong_endpoint.c_str());
+    opendal_operator_options_set(options, "account_name",
+                                 cfg.access_key_id_.c_str());
+    opendal_operator_options_set(options, "account_key",
+                                 cfg.secret_access_key_.c_str());
   }
 
-  opendal_result_operator_new tmp_result = opendal_operator_new(scheme, options);
+  opendal_result_operator_new tmp_result =
+      opendal_operator_new(get_storage_type_name(type_), options);
   dump_error(tmp_result.error);
   ASSERT_TRUE(tmp_result.error == nullptr);
   opendal_operator_options_free(options);
@@ -925,6 +937,7 @@ TEST_F(ObDalTest, test_catch_panic)
 
 int main(int argc, char **argv) 
 {
+  parse_service_arg(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

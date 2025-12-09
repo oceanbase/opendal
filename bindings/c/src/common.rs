@@ -393,7 +393,7 @@ pub extern "C" fn opendal_fin_env() {
             tracing::error!("failed to lock global RUNTIME: {}", e);
         }
     }
-    fastrace::flush();
+    // fastrace::flush();
 
     unsafe {
         OB_LOG_HANDLER = None;

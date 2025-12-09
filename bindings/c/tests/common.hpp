@@ -30,14 +30,9 @@
 #include <unistd.h>
 #include <cassert>
 #include <string>
+#include <cstdlib>
 #include <fstream>
 
-static constexpr char scheme[] = "xxx";
-static constexpr char region[] = "xxx";
-static constexpr char endpoint[] = "xxx";
-static constexpr char bucket[] = "xxx";
-static constexpr char access_key_id[] = "xxx";
-static constexpr char secret_access_key[] = "xxx";
 enum StorageType
 {
   AZBLOB,
@@ -58,6 +53,146 @@ StorageType get_storage_type(const char *scheme)
     return OSS;
   } else {
     return MAX_TYPE;
+  }
+}
+
+const char *get_storage_type_name(StorageType storage_type)
+{
+  const char *name = nullptr;
+  if (storage_type == AZBLOB) {
+    name = "azblob";
+  } else if (storage_type == S3) {
+    name = "s3";
+  } else if (storage_type == OSS) {
+    name = "oss";
+  } else {
+    name = "unknown";
+  }
+  return name;
+}
+
+// Centralized test configuration
+struct TestConfig
+{
+public:
+  bool is_valid()
+  {
+    bool ret = true;
+    if (service_.empty() || storage_type_ == MAX_TYPE) {
+      std::cerr << "service_ is empty or storage_type_ is MAX_TYPE" << std::endl;
+      ret = false;
+    } else if (endpoint_.empty() || bucket_.empty() || access_key_id_.empty() || secret_access_key_.empty()) {
+      std::cerr << "endpoint_ or bucket_ or access_key_id_ or secret_access_key_ is empty" << std::endl;
+      ret = false;
+    } else if (storage_type_ == S3) {
+      if (region_.empty()) {
+        ret = false;
+      }
+    }
+    return ret;
+  }
+public:
+  std::string service_;           // s3 | oss | azblob | cos | gcs | obs | bos
+  StorageType storage_type_;
+  std::string region_;            // only for s3
+  std::string endpoint_;
+  std::string bucket_;            // oss/s3: bucket, azblob: container
+  std::string access_key_id_;     // s3/oss: access_key_id, azblob: account_name
+  std::string secret_access_key_; // s3: secret_access_key, oss: access_key_secret, azblob: account_key
+};
+
+static inline TestConfig &test_config_instance()
+{
+  static TestConfig cfg;
+  return cfg;
+}
+
+// Parse custom CLI arg: --service=<s3|oss|azblob> or --service <s3|oss|azblob>
+// This function consumes the arguments from argv so that gtest won't see them.
+static inline void parse_service_arg(int &argc, char **argv)
+{
+  int write_idx = 1;
+  TestConfig &cfg = test_config_instance();
+  for (int i = 1; i < argc; ++i) {
+    const char *arg = argv[i];
+    bool consumed = false;
+    if (strncmp(arg, "--service=", 10) == 0) {
+      cfg.service_ = std::string(arg + 10);
+      consumed = true;
+    } else if (strcmp(arg, "--service") == 0 && i + 1 < argc) {
+      cfg.service_ = std::string(argv[i + 1]);
+      consumed = true;
+      ++i; // also consume the value
+    }
+    if (!consumed) {
+      argv[write_idx++] = argv[i];
+    }
+  }
+  argc = write_idx;
+}
+
+std::string opendal_get_env(const char *key)
+{
+  std::string value = "";
+  if (const char *v = std::getenv(key)) {
+    value = v;
+  }
+  return value;
+}
+
+// Load env based on selected scheme and legacy fallbacks into cfg
+static inline void load_test_config_from_env(TestConfig &cfg)
+{
+  const std::string &service = cfg.service_;
+  cfg.storage_type_ = MAX_TYPE;
+
+  if (service == "s3") {
+    cfg.storage_type_ = S3;
+    cfg.bucket_ = opendal_get_env("opendal_s3_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_s3_endpoint");
+    cfg.region_ = opendal_get_env("opendal_s3_region");
+    cfg.access_key_id_ = opendal_get_env("opendal_s3_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_s3_secret_access_key");
+  } else if (service == "oss") {
+    cfg.storage_type_ = OSS;
+    cfg.bucket_ = opendal_get_env("opendal_oss_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_oss_endpoint");
+    cfg.access_key_id_ = opendal_get_env("opendal_oss_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_oss_access_key_secret");
+  } else if (service == "azblob") {
+    cfg.storage_type_ = AZBLOB;
+    cfg.bucket_ = opendal_get_env("opendal_azblob_container");
+    cfg.endpoint_ = opendal_get_env("opendal_azblob_endpoint");
+    cfg.access_key_id_ = opendal_get_env("opendal_azblob_account_name");
+    cfg.secret_access_key_ = opendal_get_env("opendal_azblob_account_key");
+  } else if (service == "cos") {
+    cfg.storage_type_ = S3;
+    cfg.bucket_ = opendal_get_env("opendal_cos_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_cos_endpoint");
+    cfg.region_ = opendal_get_env("opendal_cos_region");
+    cfg.access_key_id_ = opendal_get_env("opendal_cos_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_cos_secret_access_key");
+  } else if (service == "gcs") {
+    cfg.storage_type_ = S3;
+    cfg.bucket_ = opendal_get_env("opendal_gcs_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_gcs_endpoint");
+    cfg.region_ = opendal_get_env("opendal_gcs_region");
+    cfg.access_key_id_ = opendal_get_env("opendal_gcs_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_gcs_secret_access_key");
+  } else if (service == "obs") {
+    cfg.storage_type_ = S3;
+    cfg.bucket_ = opendal_get_env("opendal_obs_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_obs_endpoint");
+    cfg.region_ = opendal_get_env("opendal_obs_region");
+    cfg.access_key_id_ = opendal_get_env("opendal_obs_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_obs_secret_access_key");
+  } else if (service == "bos") {
+    cfg.storage_type_ = S3;
+    cfg.bucket_ = opendal_get_env("opendal_bos_bucket");
+    cfg.endpoint_ = opendal_get_env("opendal_bos_endpoint");
+    cfg.region_ = opendal_get_env("opendal_bos_region");
+    cfg.access_key_id_ = opendal_get_env("opendal_bos_access_key_id");
+    cfg.secret_access_key_ = opendal_get_env("opendal_bos_secret_access_key");
   }
 }
 

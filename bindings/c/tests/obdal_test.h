@@ -42,7 +42,6 @@ public:
       ob_span_(nullptr),
       type_(MAX_TYPE)
   {
-    base_path_ = "obdal_test_" + get_formatted_time() + "/";
   }
 protected:
   void SetUp() override
@@ -53,43 +52,44 @@ protected:
     ob_span_ = ob_span;
 
     opendal_operator_options *options = opendal_operator_options_new();
-    type_ = get_storage_type(scheme);
+    TestConfig &cfg = test_config_instance();
+    type_ = cfg.storage_type_;
     ASSERT_NE(MAX_TYPE, type_);
     if (type_ == S3) {
-      opendal_operator_options_set(options, "bucket", bucket);
-      opendal_operator_options_set(options, "endpoint", endpoint);
-      opendal_operator_options_set(options, "region", region);
-      opendal_operator_options_set(options, "access_key_id", access_key_id);
-      opendal_operator_options_set(options, "secret_access_key", secret_access_key);
+      opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
+      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
+      opendal_operator_options_set(options, "region", cfg.region_.c_str());
+      opendal_operator_options_set(options, "access_key_id", cfg.access_key_id_.c_str());
+      opendal_operator_options_set(options, "secret_access_key", cfg.secret_access_key_.c_str());
       opendal_operator_options_set(options, "disable_config_load", "true");
       opendal_operator_options_set(options, "disable_ec2_metadata", "true");
       opendal_operator_options_set(options, "enable_virtual_host_style", "true");
       opendal_operator_options_set(options, "checksum_algorithm", "md5");
     } else if (type_ == OSS) {
-      opendal_operator_options_set(options, "bucket", bucket);
-      opendal_operator_options_set(options, "endpoint", endpoint);
-      opendal_operator_options_set(options, "access_key_id", access_key_id);
-      opendal_operator_options_set(options, "access_key_secret", secret_access_key);
+      opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
+      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
+      opendal_operator_options_set(options, "access_key_id", cfg.access_key_id_.c_str());
+      opendal_operator_options_set(options, "access_key_secret", cfg.secret_access_key_.c_str());
       opendal_operator_options_set(options, "checksum_algorithm", "md5");
     } else if (type_ == AZBLOB) {
-      opendal_operator_options_set(options, "container", bucket);
-      opendal_operator_options_set(options, "endpoint", endpoint);
-      opendal_operator_options_set(options, "account_name", access_key_id);
-      opendal_operator_options_set(options, "account_key", secret_access_key);
+      opendal_operator_options_set(options, "container", cfg.bucket_.c_str());
+      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
+      opendal_operator_options_set(options, "account_name", cfg.access_key_id_.c_str());
+      opendal_operator_options_set(options, "account_key", cfg.secret_access_key_.c_str());
       opendal_operator_options_set(options, "checksum_algorithm", "md5");
     }
     opendal_operator_options_set(options, "tenant_id", "1003");
     opendal_operator_options_set(options, "timeout", "5");
 
     // Given A new OpenDAL Blocking Operator
-    opendal_result_operator_new result = opendal_operator_new(scheme, options);
+    opendal_result_operator_new result = opendal_operator_new(get_storage_type_name(type_), options);
     dump_error(result.error);
     ASSERT_EQ(nullptr, result.error);
 
     op_ = result.op;
     ASSERT_NE(nullptr, op_);
 
-    opendal_error *error = opendal_async_operator_new(scheme, options, &async_op_);
+    opendal_error *error = opendal_async_operator_new(get_storage_type_name(type_), options, &async_op_);
     dump_error(error);
     ASSERT_EQ(nullptr, error);
 
@@ -110,6 +110,11 @@ protected:
   }
   static void SetUpTestCase() 
   {
+    // Load configuration from environment variables based on selected schema.
+    // Prefer new prefixed envs, fallback to legacy if needed.
+    TestConfig &cfg = test_config_instance();
+    load_test_config_from_env(cfg);
+    ASSERT_TRUE(cfg.is_valid());
     opendal_error *error = opendal_init_env(reinterpret_cast<void *>(my_alloc), 
                                             reinterpret_cast<void *>(my_free),
                                             reinterpret_cast<void *>(ob_log_handler),
@@ -122,6 +127,7 @@ protected:
                                             10); // max idle time of client (unit s)
     opendal_register_retry_timeout_fn(reinterpret_cast<void *>(get_retry_timeout));
     ASSERT_EQ(error, nullptr);
+    base_path_ = "obdal_test_" + get_formatted_time() + "/";
   }
 
   static void TearDownTestCase()
@@ -129,7 +135,7 @@ protected:
     opendal_fin_env();
   }
 protected:
-  std::string base_path_;
+  static std::string base_path_;
   const opendal_operator *op_;
   opendal_async_operator *async_op_;
   ObSpan *ob_span_;
@@ -137,40 +143,40 @@ protected:
 };
 
 class ObDalAsyncContext {
-  public:
-    void wait()
-    {
-      std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait(lock, [this] { return completed_; });
-    }
-    void reset()
-    {
-      completed_ = false;
-      free_error(error_);
-      length_ = 0;
-      callback_count_ = 0;
-    }
-  public:
-    bool completed_ = false;
-    opendal_error *error_ = nullptr;
-    int64_t length_ = 0;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    int64_t callback_count_ = 0;
-  };
-  
-  void obdal_async_callback(opendal_error *error, const int64_t length, void *ctx)
+public:
+  void wait()
   {
-    ObDalAsyncContext *context = static_cast<ObDalAsyncContext *>(ctx);
-    {
-      std::unique_lock<std::mutex> lock(context->mutex_);
-      context->length_ = length;
-      context->error_ = error;
-      context->completed_ = true;
-      context->callback_count_++;
-      assert(context->callback_count_ == 1);
-    }
-    context->cv_.notify_all();
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [this] { return completed_; });
   }
+  void reset()
+  {
+    completed_ = false;
+    free_error(error_);
+    length_ = 0;
+    callback_count_ = 0;
+  }
+public:
+  bool completed_ = false;
+  opendal_error *error_ = nullptr;
+  int64_t length_ = 0;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  int64_t callback_count_ = 0;
+};
+  
+void obdal_async_callback(opendal_error *error, const int64_t length, void *ctx)
+{
+  ObDalAsyncContext *context = static_cast<ObDalAsyncContext *>(ctx);
+  {
+    std::unique_lock<std::mutex> lock(context->mutex_);
+    context->length_ = length;
+    context->error_ = error;
+    context->completed_ = true;
+    context->callback_count_++;
+    assert(context->callback_count_ == 1);
+  }
+  context->cv_.notify_all();
+}
 
 #endif
