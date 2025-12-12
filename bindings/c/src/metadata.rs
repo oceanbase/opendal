@@ -94,6 +94,32 @@ impl opendal_metadata {
         }
     }
 
+    /// \brief Return the content_md5 of the metadata
+    #[no_mangle]
+    pub extern "C" fn opendal_metadata_content_md5(&self) -> *mut c_char {
+        let ret = catch_unwind(|| {
+            match self.deref().content_md5() {
+                Some(md5) => {
+                    match CString::new(md5) {
+                        Ok(cstring) => cstring.into_raw(),
+                        Err(_) => {
+                            warn!("fail to convert to CString, name: {:?}", md5);
+                            std::ptr::null_mut()
+                        }
+                    }
+                }
+                None => std::ptr::null_mut()
+            }
+        });
+        match ret {
+            Ok(r) => r,
+            Err(err) => {
+                dump_panic(err);
+                std::ptr::null_mut()
+            }
+        }
+    }
+
     /// \brief Return whether the path represents a file
     ///
     /// # Example

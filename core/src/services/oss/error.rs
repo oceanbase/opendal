@@ -86,6 +86,7 @@ pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> 
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         "PositionNotEqualToLength" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
         "QpsLimitExceeded" => Some((ErrorKind::RateLimited, true)),
+        "FileImmutable" | "Forbidden by object lock" => Some((ErrorKind::FileImmutable, false)),
         _ => None,
     }
 }

@@ -880,6 +880,28 @@ TEST_F(ObDalTest, test_write_with_if_not_exists)
   free_error(error);
 }
 
+TEST_F(ObDalTest, test_calc_md5)
+{
+  std::string path = base_path_ + "test_calc_md5";
+  opendal_bytes data = {
+    .data = (uint8_t*)"1234567890",
+    .len = 10,
+  };
+  opendal_error *error = nullptr;
+  error = opendal_operator_write(op_, path.c_str(), &data);
+  ASSERT_EQ(nullptr, error);
+
+  char *md5 = opendal_calc_md5(data.data, data.len);
+  opendal_result_stat result = opendal_operator_stat(op_, path.c_str());
+  ASSERT_EQ(nullptr, result.error);
+  opendal_metadata *meta = result.meta;
+  char *content_md5 = opendal_metadata_content_md5(meta);
+  ASSERT_TRUE(strcmp(md5, content_md5) == 0);
+  opendal_c_char_free(md5);
+  opendal_c_char_free(content_md5);
+  opendal_metadata_free(meta);
+}
+
 TEST_F(ObDalTest, test_catch_panic)
 {
   opendal_error *error = opendal_panic_test();
