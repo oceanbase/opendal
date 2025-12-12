@@ -150,6 +150,7 @@ task_local! {
     pub static RETRY_TIMEOUT: Option<Duration>;
 }
 
+/// the default retry timeout is 120 seconds
 pub const RETRY_TIMEOUT_DEFAULT: Duration = Duration::from_secs(120);
 pub fn get_retry_timeout() -> Option<Duration> {
     let mut ret = Some(RETRY_TIMEOUT_DEFAULT);
