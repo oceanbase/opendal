@@ -82,9 +82,13 @@ pub use self::retry::RETRY_TIMEOUT;
 pub use self::retry::TASK_START_TIME;
 pub use self::retry::RETRY_TIMEOUT_DEFAULT;
 
+#[cfg(feature = "layers-obguard")]
 mod obguard;
+#[cfg(feature = "layers-obguard")]
 pub use self::obguard::ObGuardLayer;
+#[cfg(feature = "layers-obguard")]
 pub use self::obguard::is_slow;
+#[cfg(feature = "layers-obguard")]
 pub use self::obguard::calc_speed;
 
 #[cfg(feature = "layers-tracing")]

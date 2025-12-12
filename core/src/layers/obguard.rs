@@ -17,13 +17,12 @@
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::ops::Div;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
 
-use log::warn;
+use tracing::warn;
 
 use crate::raw::*;
 use crate::*;

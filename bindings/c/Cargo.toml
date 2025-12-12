@@ -45,6 +45,7 @@ ring = "=0.17.8"
 opendal = { version = ">=0", path = "../../core", features = [
   "layers-blocking",
   "layers-tracing",
+  "layers-obguard",
   # "layers-fastrace",
   # These are default features before v0.46. TODO: change to optional features #4313
   "services-azblob",
@@ -76,3 +77,4 @@ rand = "0.9.2"
 fastrace = { version = "0.7.1", features = [ 
   # "enable" 
 ]}
+home = "=0.5.11"

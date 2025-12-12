@@ -555,6 +555,7 @@ pub fn obdal_block_on<'a, T>(f: impl Future<Output = T> + Send + 'a, tenant_id: 
     ))
 }
 
+#[cfg(test)]
 mod test {
     #[warn(unused_imports)]
     use super::*;
