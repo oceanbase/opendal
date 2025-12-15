@@ -373,7 +373,8 @@ impl Builder for OssBuilder {
 
         let mut cfg = AliyunConfig::default();
         // Load cfg from env first.
-        cfg = cfg.from_env();
+        // remove this to avoid high cpu usage
+        // cfg = cfg.from_env();
 
         if let Some(v) = self.config.access_key_id {
             cfg.access_key_id = Some(v);
