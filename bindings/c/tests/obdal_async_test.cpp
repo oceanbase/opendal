@@ -92,6 +92,19 @@ TEST_F(ObDalTest, test_write_with_if_match)
   dump_error(context.error_);
   ASSERT_EQ(nullptr, context.error_);
   ASSERT_EQ(context.length_, 24);
+
+
+  context.reset();
+  opendal_bytes data3 = {
+    .data = (uint8_t*)"this_string",
+    .len = 11,
+  };
+  opendal_async_operator_write_with_if_match(async_op_, path.c_str(), &data3, obdal_async_callback, &context);
+  context.wait();
+  dump_error(context.error_);
+  ASSERT_NE(nullptr, context.error_);
+  ASSERT_EQ(context.error_->code, OPENDAL_CONDITION_NOT_MATCH);
+  ASSERT_EQ(context.length_, 0);
 }
 
 TEST_F(ObDalTest, test_parallel_read)

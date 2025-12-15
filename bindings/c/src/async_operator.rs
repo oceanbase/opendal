@@ -324,7 +324,10 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_if_match(
 
                 if ret.is_err() {
                     tracing::warn!("failed to write with if not exists: {}", ret.as_ref().err().unwrap());
-                    let read_length = buffer_clone.len();
+                    // Unstable useage
+                    // please notice that read more one byte to check the content is match
+                    // but in some service, the range overflow error will be returned.
+                    let read_length = buffer_clone.len() + 1;
                     match op.deref().read_with(path).range(0 as u64..(read_length as u64)).await {
                         Ok(read_buffer) => {
                             if read_buffer.to_bytes() != buffer_clone.to_bytes() {
