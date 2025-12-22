@@ -53,47 +53,41 @@ protected:
 
     opendal_operator_options *options = opendal_operator_options_new();
     TestConfig &cfg = test_config_instance();
+    opendal_operator_config *config = opendal_operator_config_new();
     type_ = cfg.storage_type_;
     ASSERT_NE(MAX_TYPE, type_);
+    config->bucket = cfg.bucket_.c_str();
+    config->endpoint = cfg.endpoint_.c_str();
+    config->access_key_id = cfg.access_key_id_.c_str();
+    config->secret_access_key = cfg.secret_access_key_.c_str();
     if (type_ == S3) {
-      opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
-      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
-      opendal_operator_options_set(options, "region", cfg.region_.c_str());
-      opendal_operator_options_set(options, "access_key_id", cfg.access_key_id_.c_str());
-      opendal_operator_options_set(options, "secret_access_key", cfg.secret_access_key_.c_str());
-      opendal_operator_options_set(options, "disable_config_load", "true");
-      opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-      opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-      opendal_operator_options_set(options, "checksum_algorithm", "md5");
+      config->region = cfg.region_.c_str();
+      config->disable_config_load = true;
+      config->disable_ec2_metadata = true;
+      config->enable_virtual_host_style = true;
     } else if (type_ == OSS) {
-      opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
-      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
-      opendal_operator_options_set(options, "access_key_id", cfg.access_key_id_.c_str());
-      opendal_operator_options_set(options, "access_key_secret", cfg.secret_access_key_.c_str());
-      opendal_operator_options_set(options, "checksum_algorithm", "md5");
+      config->checksum_algorithm = "md5";
     } else if (type_ == AZBLOB) {
-      opendal_operator_options_set(options, "container", cfg.bucket_.c_str());
-      opendal_operator_options_set(options, "endpoint", cfg.endpoint_.c_str());
-      opendal_operator_options_set(options, "account_name", cfg.access_key_id_.c_str());
-      opendal_operator_options_set(options, "account_key", cfg.secret_access_key_.c_str());
-      opendal_operator_options_set(options, "checksum_algorithm", "md5");
+      config->checksum_algorithm = "md5";
     }
-    opendal_operator_options_set(options, "tenant_id", "1003");
-    opendal_operator_options_set(options, "timeout", "5");
+    config->tenant_id = 1003;
+    config->timeout = 5;
+    config->retry_max_times = 3;
 
     // Given A new OpenDAL Blocking Operator
-    opendal_result_operator_new result = opendal_operator_new(get_storage_type_name(type_), options);
+    opendal_result_operator_new result = opendal_operator_new2(get_storage_type_name(type_), config);
     dump_error(result.error);
     ASSERT_EQ(nullptr, result.error);
 
     op_ = result.op;
     ASSERT_NE(nullptr, op_);
 
-    opendal_error *error = opendal_async_operator_new(get_storage_type_name(type_), options, &async_op_);
+    opendal_error *error = opendal_async_operator_new(get_storage_type_name(type_), config, &async_op_);
     dump_error(error);
     ASSERT_EQ(nullptr, error);
 
     opendal_operator_options_free(options);
+    opendal_operator_config_free(config);
   }
 
   void TearDown() override 

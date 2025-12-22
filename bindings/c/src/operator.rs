@@ -34,6 +34,7 @@ use core::Configurator;
 
 use super::*;
 use common::*;
+use crate::types::opendal_operator_config;
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -182,6 +183,168 @@ fn build_operator(
     Ok(op)
 }
 
+/// Build operator from configuration struct (avoid HashMap overhead)
+fn build_operator2(
+    schema: core::Scheme,
+    config: &opendal_operator_config,
+) -> core::Result<core::Operator> {
+    // 1. Validate configuration
+    config.is_valid().map_err(|e| 
+        core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
+    
+    // 2. Extract common configuration (defaults already set in opendal_operator_config_new)
+    let timeout = config.timeout;
+    let retry_max_times = config.retry_max_times as usize;
+    let tenant_id = config.tenant_id;
+
+    
+    // 3. Build operator based on scheme - directly call builder methods
+    let build_result = |schema: core::Scheme| -> core::Result<core::Operator> {
+        unsafe {
+            let bucket = config.get_str(config.bucket).expect("bucket should be none");
+            let endpoint = config.get_str(config.endpoint).expect("endpoint should not be none");
+            let access_key_id = config.get_str(config.access_key_id).expect("access_key_id should not be none");
+            let secret_access_key = config.get_str(config.secret_access_key).expect("secret_access_key should not be none");
+            match schema {
+                core::Scheme::S3 => {
+                    let mut builder = core::services::S3::default();
+                    builder = builder
+                        .bucket(bucket)
+                        .endpoint(endpoint)
+                        .access_key_id(access_key_id)
+                        .secret_access_key(secret_access_key);
+                    
+                    // Optional fields
+                    if let Some(region) = config.get_str(config.region) {
+                        builder = builder.region(region);
+                    }
+                    if let Some(session_token) = config.get_str(config.session_token) {
+                        builder = builder.session_token(session_token);
+                    }
+                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                        builder = builder.checksum_algorithm(checksum_algorithm);
+                    }
+                    
+                    // S3-specific configuration
+                    if config.disable_config_load {
+                        builder = builder.disable_config_load();
+                    }
+                    if config.disable_ec2_metadata {
+                        builder = builder.disable_ec2_metadata();
+                    }
+                    if config.enable_virtual_host_style {
+                        builder = builder.enable_virtual_host_style();
+                    }
+                    
+                    // HTTP Client
+                    let http_client = HTTP_CLIENT.read().map_err(|_| {
+                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                    })?;
+                    if let Some(client) = http_client.as_ref() {
+                        builder = builder.http_client(client.clone());
+                    }
+                    
+                    let acc = builder.build()?;
+                    Ok(core::OperatorBuilder::new(acc).finish())
+                }
+                
+                core::Scheme::Oss => {
+                    let mut builder = core::services::Oss::default();
+                    
+                    builder = builder
+                        .bucket(bucket)
+                        .endpoint(endpoint)
+                        .access_key_id(access_key_id)
+                        .access_key_secret(secret_access_key);
+                    
+                    // Optional fields
+                    if let Some(session_token) = config.get_str(config.session_token) {
+                        builder = builder.session_token(session_token);
+                    }
+                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                        builder = builder.checksum_algorithm(checksum_algorithm);
+                    }
+                    
+                    // HTTP Client
+                    let http_client = HTTP_CLIENT.read().map_err(|_| {
+                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                    })?;
+                    if let Some(client) = http_client.as_ref() {
+                        builder = builder.http_client(client.clone());
+                    }
+                    
+                    let acc = builder.build()?;
+                    Ok(core::OperatorBuilder::new(acc).finish())
+                }
+                
+                core::Scheme::Azblob => {
+                    let mut builder = core::services::Azblob::default();
+                    
+                    builder = builder
+                        .container(bucket)
+                        .endpoint(endpoint)
+                        .account_name(access_key_id)
+                        .account_key(secret_access_key);
+                    
+                    // Optional fields
+                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                        builder = builder.checksum_algorithm(checksum_algorithm);
+                    }
+                    
+                    // HTTP Client
+                    let http_client = HTTP_CLIENT.read().map_err(|_| {
+                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                    })?;
+                    if let Some(client) = http_client.as_ref() {
+                        builder = builder.http_client(client.clone());
+                    }
+                    
+                    let acc = builder.build()?;
+                    Ok(core::OperatorBuilder::new(acc).finish())
+                }
+                
+                v => {
+                    Err(core::Error::new(
+                        core::ErrorKind::Unsupported,
+                        "scheme is not enabled or supported",
+                    )
+                    .with_context("scheme", v))
+                }
+            }
+        }
+    };
+    
+    let mut op = build_result(schema)?;
+    
+    // 4. Add common layers
+    op = op.layer(core::layers::TracingLayer);
+    op = op.layer(
+        TimeoutLayer::new()
+            .with_timeout(Duration::from_secs(timeout))
+            .with_io_timeout(Duration::from_secs(timeout)),
+    );
+    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
+    op = op.layer(core::layers::ObGuardLayer::new());
+    
+    // 5. Add BlockingLayer if needed (for blocking operator)
+    if !op.info().full_capability().blocking {
+        if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
+            let handle = tokio::runtime::Handle::try_current()
+                .unwrap_or_else(|_| (*runtime).handle().clone());
+            let _guard = handle.enter();
+            let blocking_layer = core::layers::BlockingLayer::create(Some(tenant_id))?;
+            op = op.layer(blocking_layer);
+        } else {
+            return Err(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "failed to get global RUNTIME, obdal env maybe not inited",
+            ));
+        }
+    }
+    
+    Ok(op)
+}
+
 /// \brief Construct an operator based on `scheme` and `options`
 ///
 /// Uses an array of key-value pairs to initialize the operator based on provided `scheme`
@@ -267,6 +430,109 @@ pub unsafe extern "C" fn opendal_operator_new(
             },
         }
     });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_new {
+            op: std::ptr::null_mut(),
+            error,
+        },
+    }
+}
+
+/// \brief Construct an operator based on `scheme` and `config` (optimized version)
+///
+/// This is an optimized version of opendal_operator_new that avoids HashMap overhead
+/// by directly using a configuration structure. This provides better performance for
+/// operator initialization.
+///
+/// @param scheme the service scheme you want to specify, e.g. "s3", "oss", "azblob"
+/// @param config the pointer to the configuration structure
+/// @see opendal_operator_config
+/// @see opendal_operator_config_new
+/// @return A valid opendal_result_operator_new with the operator and error fields
+///
+/// # Example
+///
+/// ```C
+/// // Allocate a new config
+/// opendal_operator_config *config = opendal_operator_config_new();
+/// 
+/// // Set the required fields
+/// config->bucket = "my-bucket";
+/// config->endpoint = "https://s3.amazonaws.com";
+/// config->access_key_id = "my-access-key";
+/// config->secret_access_key = "my-secret-key";
+/// config->region = "us-east-1";
+///
+/// // Construct the operator based on the config and scheme
+/// opendal_result_operator_new result = opendal_operator_new2("s3", config);
+/// opendal_operator* op = result.op;
+///
+/// // You can free the config right away since it's copied
+/// opendal_operator_config_free(config);
+///
+/// // ... your operations
+/// ```
+///
+/// # Safety
+///
+/// The only unsafe case is passing invalid pointers to the `scheme` or `config` arguments.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_new2(
+    scheme: *const c_char,
+    config: *const opendal_operator_config,
+) -> opendal_result_operator_new {
+    let ret = catch_unwind(|| {
+        // Parse scheme
+        let scheme = match c_char_to_str(scheme) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+        let scheme = match core::Scheme::from_str(scheme) {
+            Ok(s) => s,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: opendal_error::new(e),
+                };
+            }
+        };
+        
+        // Validate config pointer
+        if config.is_null() {
+            return opendal_result_operator_new {
+                op: std::ptr::null_mut(),
+                error: opendal_error::new(core::Error::new(
+                    core::ErrorKind::ConfigInvalid,
+                    "config is null",
+                )),
+            };
+        }
+        
+        let config_ref = &*config;
+        let tenant_id = config_ref.tenant_id;
+        
+        // Build operator using config
+        match build_operator2(scheme, config_ref) {
+            Ok(op) => opendal_result_operator_new {
+                op: Box::into_raw(Box::new(opendal_operator {
+                    inner: Box::into_raw(Box::new(op.blocking())) as _,
+                    tenant_id,
+                })),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_operator_new {
+                op: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    
     match handle_result(ret) {
         Ok(ret) => ret,
         Err(error) => opendal_result_operator_new {

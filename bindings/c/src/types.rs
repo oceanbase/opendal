@@ -23,6 +23,8 @@ use tracing::{span, span::EnteredSpan, Level};
 
 use super::*;
 use opendal::Buffer;
+use crate::common::{SINGLE_IO_TIMEOUT_DEFAULT_S, RETRY_MAX_TIMES};
+use ::opendal::layers::DEFAULT_TENANT_ID;
 
 /// \brief opendal_bytes carries raw-bytes with its length
 ///
@@ -390,6 +392,133 @@ pub extern "C" fn ob_drop_span(span: *mut ObSpan) {
             unsafe {
                 let _ = Box::from_raw(span);
             }
+        }
+    });
+    handle_result_without_ret(ret);
+}
+
+/// \brief C++ ABI compatible operator configuration structure
+///
+/// This structure is designed to avoid HashMap creation overhead.
+/// C++ code can directly populate this struct and pass it to Rust.
+///
+/// @see opendal_operator_new2 for blocking operator
+/// @see opendal_async_operator_new for async operator
+/// @see opendal_operator_config_new to allocate a new config
+/// @see opendal_operator_config_free to free the config
+#[repr(C)]
+pub struct opendal_operator_config {
+    // === Common configuration for all services ===
+    /// Bucket name (S3/OSS) or container name (AzBlob)
+    pub bucket: *const c_char,
+    /// Service endpoint
+    pub endpoint: *const c_char,
+    /// Access Key ID (S3/OSS) or Account Name (AzBlob)
+    pub access_key_id: *const c_char,
+    /// Secret Access Key (S3) / Access Key Secret (OSS) / Account Key (AzBlob)
+    pub secret_access_key: *const c_char,
+    /// Timeout in seconds
+    pub timeout: u64,
+    /// Session Token
+    pub session_token: *const c_char,
+    /// Tenant ID
+    pub tenant_id: u64,
+    /// Checksum algorithm (e.g., "md5", "crc32c", "crc32")
+    pub checksum_algorithm: *const c_char,
+    
+    // === S3-specific configuration ===
+    /// AWS Region (S3 only)
+    pub region: *const c_char,
+    /// Disable config loading from environment (S3 only)
+    pub disable_config_load: bool,
+    /// Disable EC2 metadata (S3 only)
+    pub disable_ec2_metadata: bool,
+    /// Enable virtual host style (S3 only)
+    pub enable_virtual_host_style: bool,
+    
+    // === Internal fields ===
+    /// Maximum retry times
+    pub retry_max_times: u64,
+}
+
+impl opendal_operator_config {
+    /// Validate configuration (Rust-side only, not exposed to C++)
+    pub(crate) fn is_valid(&self) -> Result<(), String> {
+        // Validate required fields
+        if self.bucket.is_null() {
+            return Err("bucket is required".to_string());
+        }
+        if self.endpoint.is_null() {
+            return Err("endpoint is required".to_string());
+        }
+        if self.access_key_id.is_null() {
+            return Err("access_key_id is required".to_string());
+        }
+        if self.secret_access_key.is_null() {
+            return Err("secret_access_key is required".to_string());
+        }
+        
+        Ok(())
+    }
+    
+    /// Helper method: safely convert C string to Rust &str
+    pub(crate) unsafe fn get_str<'a>(&self, ptr: *const c_char) -> Option<&'a str> {
+        if ptr.is_null() {
+            None
+        } else {
+            CStr::from_ptr(ptr).to_str().ok()
+        }
+    }
+}
+
+/// \brief Construct a new opendal_operator_config on heap
+///
+/// The returned config is initialized with default values.
+/// You need to set the required fields before using it.
+///
+/// @return A pointer to newly allocated opendal_operator_config
+/// @see opendal_operator_config_free
+#[no_mangle]
+pub extern "C" fn opendal_operator_config_new() -> *mut opendal_operator_config {
+    let ret = catch_unwind(|| {
+        let config = opendal_operator_config {
+            bucket: std::ptr::null(),
+            endpoint: std::ptr::null(),
+            access_key_id: std::ptr::null(),
+            secret_access_key: std::ptr::null(),
+            timeout: SINGLE_IO_TIMEOUT_DEFAULT_S,  // Initialize with default value
+            session_token: std::ptr::null(),
+            tenant_id: DEFAULT_TENANT_ID,  // Initialize with default value
+            checksum_algorithm: std::ptr::null(),
+            region: std::ptr::null(),
+            disable_config_load: false,
+            disable_ec2_metadata: false,
+            enable_virtual_host_style: false,
+            retry_max_times: RETRY_MAX_TIMES,  // Initialize with default value
+        };
+        Box::into_raw(Box::new(config))
+    });
+    match ret {
+        Ok(r) => r,
+        Err(err) => {
+            dump_panic(err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// \brief Free the heap memory used by opendal_operator_config
+///
+/// # Safety
+///
+/// The pointer must be a valid pointer returned by opendal_operator_config_new
+///
+/// @param ptr The pointer to opendal_operator_config to be freed
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_config_free(ptr: *mut opendal_operator_config) {
+    let ret = catch_unwind(|| {
+        if !ptr.is_null() {
+            drop(Box::from_raw(ptr));
         }
     });
     handle_result_without_ret(ret);
