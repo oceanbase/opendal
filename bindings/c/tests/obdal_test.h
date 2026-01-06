@@ -52,38 +52,20 @@ protected:
     ob_span_ = ob_span;
 
     opendal_operator_options *options = opendal_operator_options_new();
-    TestConfig &cfg = test_config_instance();
     opendal_operator_config *config = opendal_operator_config_new();
+    TestConfig &cfg = test_config_instance();
+    ASSERT_EQ(true, cfg.is_valid());
+    ASSERT_EQ(true, cfg.build_config(config));
     type_ = cfg.storage_type_;
-    ASSERT_NE(MAX_TYPE, type_);
-    config->bucket = cfg.bucket_.c_str();
-    config->endpoint = cfg.endpoint_.c_str();
-    config->access_key_id = cfg.access_key_id_.c_str();
-    config->secret_access_key = cfg.secret_access_key_.c_str();
-    if (type_ == S3) {
-      config->region = cfg.region_.c_str();
-      config->disable_config_load = true;
-      config->disable_ec2_metadata = true;
-      config->enable_virtual_host_style = true;
-    } else if (type_ == OSS) {
-      config->checksum_algorithm = "md5";
-    } else if (type_ == AZBLOB) {
-      config->checksum_algorithm = "md5";
-    }
-    config->tenant_id = 1003;
-    config->timeout = 5;
-    config->retry_max_times = 3;
-    config->trace_id = "test-trace";
+    const char *scheme = get_storage_type_name(type_);
 
-    // Given A new OpenDAL Blocking Operator
-    opendal_result_operator_new result = opendal_operator_new2(get_storage_type_name(type_), config);
+    opendal_result_operator_new result = opendal_operator_new2(scheme, config);
     dump_error(result.error);
     ASSERT_EQ(nullptr, result.error);
-
     op_ = result.op;
     ASSERT_NE(nullptr, op_);
 
-    opendal_error *error = opendal_async_operator_new(get_storage_type_name(type_), config, &async_op_);
+    opendal_error *error = opendal_async_operator_new(scheme, config, &async_op_);
     dump_error(error);
     ASSERT_EQ(nullptr, error);
 
@@ -120,7 +102,7 @@ protected:
                                             32, // max client count
                                             30,
                                             10); // max idle time of client (unit s)
-    opendal_register_retry_timeout_fn(reinterpret_cast<void *>(get_retry_timeout));
+    opendal_register_retry_timeout_fn(reinterpret_cast<void *>(get_retry_timeout_ms));
     ASSERT_EQ(error, nullptr);
     base_path_ = "obdal_test_" + get_formatted_time() + "/";
   }

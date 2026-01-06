@@ -44,6 +44,7 @@ TEST_F(ObDalTest, test_rw)
   // test async read with network disruption
   {
     DisruptNetwork disrupt_network;
+    ASSERT_TRUE(disrupt_network.disrupted());
     context.reset();
     uint8_t buf[100] = { 0 };
     opendal_async_operator_read(async_op_, path.c_str(), buf, 6, 5, obdal_async_callback, &context);
@@ -57,7 +58,8 @@ TEST_F(ObDalTest, test_rw)
   {
     std::thread t([&]() {
       DisruptNetwork disrupt_network;
-      sleep(get_retry_timeout() / 2 / 1000);
+      ASSERT_TRUE(disrupt_network.disrupted());
+      sleep(get_retry_timeout_ms() / 2 / 1000);
     });
     sleep(1);
     context.reset();
@@ -72,6 +74,7 @@ TEST_F(ObDalTest, test_rw)
   // test sync read with network disruption
   {
     DisruptNetwork disrupt_network;
+    ASSERT_TRUE(disrupt_network.disrupted());
     opendal_result_operator_reader result_reader = opendal_operator_reader(op_, path.c_str());
     ASSERT_EQ(result_reader.error, nullptr);
     opendal_reader *reader = result_reader.reader;

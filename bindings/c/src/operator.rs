@@ -197,7 +197,6 @@ fn build_operator2(
     let retry_max_times = config.retry_max_times as usize;
     let tenant_id = config.tenant_id;
 
-    
     // 3. Build operator based on scheme - directly call builder methods
     let mut op = build_basic_operator_with_config(schema, config)?;
     
@@ -214,10 +213,20 @@ fn build_operator2(
     // 5. Add BlockingLayer if needed (for blocking operator)
     if !op.info().full_capability().blocking {
         if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
+            let trace_id = match c_char_to_str(config.trace_id) {
+                Ok(valid_str) => CString::new(valid_str).expect("failed to convert to CString"),
+                Err(e) => {
+                    return Err(core::Error::new(
+                        core::ErrorKind::ConfigInvalid,
+                        "failed to convert trace_id to CString",
+                    ));
+                }
+            };
+
             let handle = tokio::runtime::Handle::try_current()
                 .unwrap_or_else(|_| (*runtime).handle().clone());
             let _guard = handle.enter();
-            let blocking_layer = core::layers::BlockingLayer::create(Some(tenant_id))?;
+            let blocking_layer = core::layers::BlockingLayer::create(Some(tenant_id))?.with_trace_id(trace_id);
             op = op.layer(blocking_layer);
         } else {
             return Err(core::Error::new(
@@ -514,7 +523,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_match(
 
         let mut hasher = Md5::new();
         hasher.update(Buffer::from(bytes).to_bytes());
-        let etag = format!("\"{:x}\"", hasher.finalize());
+        let etag: String = format!("\"{:x}\"", hasher.finalize());
 
         match op.deref().write_with(path, bytes).if_match(&etag).call() {
             Ok(_) => std::ptr::null_mut(),

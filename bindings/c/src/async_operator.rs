@@ -65,7 +65,7 @@ impl opendal_async_operator {
 }
 
 /// Build async operator from configuration struct (avoid HashMap overhead)
-fn build_async_operator2(
+fn build_async_operator(
     schema: core::Scheme,
     config: &opendal_operator_config,
 ) -> core::Result<core::Operator> {
@@ -125,7 +125,7 @@ pub unsafe extern "C" fn opendal_async_operator_new(
         };
 
         // Build async operator using config
-        match build_async_operator2(scheme, config_ref) {
+        match build_async_operator(scheme, config_ref) {
             Ok(op) => {
                 *async_operator = Box::into_raw(Box::new(opendal_async_operator {
                     inner: Box::into_raw(Box::new(op)) as _,

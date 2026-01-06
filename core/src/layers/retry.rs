@@ -169,6 +169,23 @@ pub fn get_retry_timeout() -> Option<Duration> {
     ret 
 }
 
+pub type RetryTimeoutFn = unsafe extern "C" fn() -> u64;
+/// used for get retry timeout param from oceanbase
+/// need register this function from oceanbase
+pub static mut RETRY_TIMEOUT_MS_FN: Option<RetryTimeoutFn> = None;
+
+/// The function that gets the timeout from oceanbase is placed in
+/// retry.rs so that it is available in blocking.rs
+pub fn get_retry_timeout_from_ob() -> Duration {
+    unsafe {
+        if let Some(retry_timeout_ms_fn) = RETRY_TIMEOUT_MS_FN {
+            Duration::from_millis(retry_timeout_ms_fn())
+        } else {
+            RETRY_TIMEOUT_DEFAULT
+        }
+    }
+}
+
 impl RetryLayer {
     /// Create a new retry layer.
     /// # Examples
