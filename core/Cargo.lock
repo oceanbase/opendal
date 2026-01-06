@@ -4175,6 +4175,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "obdal-examples-mutli-version-list"
+version = "0.50.1"
+dependencies = [
+ "futures",
+ "opendal",
+ "tokio",
+]
+
+[[package]]
 name = "object"
 version = "0.36.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

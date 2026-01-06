@@ -82,7 +82,7 @@ pub fn init_test_service() -> Result<Option<Operator>> {
         // Don't enable blocking layer for compfs
         if op.info().scheme() != Scheme::Compfs {
             let _guard = TEST_RUNTIME.enter();
-            op = op.layer(layers::BlockingLayer::create().expect("blocking layer must be created"));
+            op = op.layer(layers::BlockingLayer::create(None).expect("blocking layer must be created"));
         }
     }
 

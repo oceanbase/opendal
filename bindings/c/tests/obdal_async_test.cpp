@@ -20,8 +20,10 @@
 #include "obdal_test.h" 
 #include <mutex>
 #include <condition_variable>
+#include <mutex>
 #include <string>
 
+std::string ObDalTest::base_path_ = "";
 
 TEST_F(ObDalTest, test_rw)
 {
@@ -243,6 +245,7 @@ TEST_F(ObDalTest, test_ob_multipart)
 
 int main(int argc, char **argv) 
 {
+  parse_service_arg(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

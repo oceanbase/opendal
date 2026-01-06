@@ -21,6 +21,8 @@
 #include <mutex>
 #include <condition_variable>
 
+std::string ObDalTest::base_path_ = "";
+
 TEST_F(ObDalTest, test_rw)
 {
   std::string path = base_path_ + "test_rw";
@@ -86,8 +88,10 @@ TEST_F(ObDalTest, test_rw)
   }
 }
 
-int main(int argc, char **argv) 
+int main(int argc, char **argv)
 {
+  // Parse custom schema arg and load envs accordingly, then forward remaining args to gtest
+  parse_service_arg(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

@@ -18,9 +18,9 @@
  */
 
 #include "obdal_test.h"
-
 // The test cases in this file are used to test the worm feature.
 
+std::string ObDalTest::base_path_ = "";
 TEST_F(ObDalTest, test_write_with_worm_check)
 {
   std::string path = base_path_ + "test_write_with_worm_check";

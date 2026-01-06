@@ -83,27 +83,7 @@ target_link_libraries(opendal_c_shared INTERFACE ${OPENDAL_SHARED_LIB})
 target_include_directories(opendal_c_shared INTERFACE include)
 add_dependencies(opendal_c_shared cargo_build)
 
-add_executable(error_handle examples/error_handle.c)
-target_link_libraries(error_handle opendal_c_shared)
 
-    # include(FetchContent)
-    # set(GOOGLETEST_VERSION 1.8.0)
-    # FetchContent_Declare(
-    #     googletest
-    #     URL https://github.com/google/googletest/archive/refs/tags/release-${GOOGLETEST_VERSION}.zip
-    #     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    # )
-    # FetchContent_MakeAvailable(googletest)
-
-    # test targets
-    # file(GLOB TEST_SRCS 
-    #     tests/bdd.cpp 
-    #     tests/common.hpp 
-    #     tests/error_msg.cpp
-    #     tests/list.cpp
-    #     tests/opinfo.cpp)
-    # add_executable(tests ${TEST_SRCS})
-    # target_link_libraries(tests opendal_c_shared gtest_main)
 
 function(add_obdal_test target_name)
     add_executable(${target_name} ${ARGN})
@@ -113,27 +93,27 @@ function(add_obdal_test target_name)
     message(STATUS "Linking with: ${stdcxx_shared}")
 endfunction()
 
-    add_obdal_test(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
-    add_obdal_test(obdal_async_test tests/obdal_test.h tests/obdal_async_test.cpp)
-    add_obdal_test(obdal_retry_test tests/obdal_retry_test.cpp)
-    add_obdal_test(obdal_worm_test tests/obdal_worm_test.cpp)
+add_obdal_test(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
+add_obdal_test(obdal_async_test tests/obdal_test.h tests/obdal_async_test.cpp)
+add_obdal_test(obdal_retry_test tests/obdal_retry_test.cpp)
+add_obdal_test(obdal_worm_test tests/obdal_worm_test.cpp)
 
-    if (TEST_ENABLE_ASAN)
-        # target_compile_options(tests PRIVATE -fsanitize=address)
-        # target_link_options(tests PRIVATE -fsanitize=address)
+if (TEST_ENABLE_ASAN)
+    # target_compile_options(tests PRIVATE -fsanitize=address)
+    # target_link_options(tests PRIVATE -fsanitize=address)
 
-        target_compile_options(obdal_test PRIVATE -fsanitize=address)
-        target_link_options(obdal_test PRIVATE -fsanitize=address)
+    target_compile_options(obdal_test PRIVATE -fsanitize=address)
+    target_link_options(obdal_test PRIVATE -fsanitize=address)
 
-        target_compile_options(obdal_async_test PRIVATE -fsanitize=address)
-        target_link_options(obdal_async_test PRIVATE -fsanitize=address)
-    endif()
+    target_compile_options(obdal_async_test PRIVATE -fsanitize=address)
+    target_link_options(obdal_async_test PRIVATE -fsanitize=address)
+endif()
 
-    # 设置 RPATH
-    set_target_properties(obdal_test PROPERTIES
-        BUILD_RPATH ${TOOL_DIR}/lib64/
-        INSTALL_RPATH ${TOOL_DIR}/lib64/
-    )
+# 设置 RPATH
+set_target_properties(obdal_test PROPERTIES
+    BUILD_RPATH ${TOOL_DIR}/lib64/
+    INSTALL_RPATH ${TOOL_DIR}/lib64/
+)
 
 install(
     FILES ${OPENDAL_STATIC_LIB}
