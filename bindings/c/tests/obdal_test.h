@@ -73,6 +73,7 @@ protected:
     config->tenant_id = 1003;
     config->timeout = 5;
     config->retry_max_times = 3;
+    config->trace_id = "test-trace";
 
     // Given A new OpenDAL Blocking Operator
     opendal_result_operator_new result = opendal_operator_new2(get_storage_type_name(type_), config);
@@ -168,6 +169,9 @@ void obdal_async_callback(opendal_error *error, const int64_t length, void *ctx)
     context->error_ = error;
     context->completed_ = true;
     context->callback_count_++;
+    if (error != nullptr) {
+      dump_error(error);
+    }
     assert(context->callback_count_ == 1);
   }
   context->cv_.notify_all();

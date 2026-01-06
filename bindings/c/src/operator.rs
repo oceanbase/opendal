@@ -199,122 +199,7 @@ fn build_operator2(
 
     
     // 3. Build operator based on scheme - directly call builder methods
-    let build_result = |schema: core::Scheme| -> core::Result<core::Operator> {
-        unsafe {
-            let bucket = config.get_str(config.bucket).expect("bucket should be none");
-            let endpoint = config.get_str(config.endpoint).expect("endpoint should not be none");
-            let access_key_id = config.get_str(config.access_key_id).expect("access_key_id should not be none");
-            let secret_access_key = config.get_str(config.secret_access_key).expect("secret_access_key should not be none");
-            match schema {
-                core::Scheme::S3 => {
-                    let mut builder = core::services::S3::default();
-                    builder = builder
-                        .bucket(bucket)
-                        .endpoint(endpoint)
-                        .access_key_id(access_key_id)
-                        .secret_access_key(secret_access_key);
-                    
-                    // Optional fields
-                    if let Some(region) = config.get_str(config.region) {
-                        builder = builder.region(region);
-                    }
-                    if let Some(session_token) = config.get_str(config.session_token) {
-                        builder = builder.session_token(session_token);
-                    }
-                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
-                        builder = builder.checksum_algorithm(checksum_algorithm);
-                    }
-                    
-                    // S3-specific configuration
-                    if config.disable_config_load {
-                        builder = builder.disable_config_load();
-                    }
-                    if config.disable_ec2_metadata {
-                        builder = builder.disable_ec2_metadata();
-                    }
-                    if config.enable_virtual_host_style {
-                        builder = builder.enable_virtual_host_style();
-                    }
-                    
-                    // HTTP Client
-                    let http_client = HTTP_CLIENT.read().map_err(|_| {
-                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-                    })?;
-                    if let Some(client) = http_client.as_ref() {
-                        builder = builder.http_client(client.clone());
-                    }
-                    
-                    let acc = builder.build()?;
-                    Ok(core::OperatorBuilder::new(acc).finish())
-                }
-                
-                core::Scheme::Oss => {
-                    let mut builder = core::services::Oss::default();
-                    
-                    builder = builder
-                        .bucket(bucket)
-                        .endpoint(endpoint)
-                        .access_key_id(access_key_id)
-                        .access_key_secret(secret_access_key);
-                    
-                    // Optional fields
-                    if let Some(session_token) = config.get_str(config.session_token) {
-                        builder = builder.session_token(session_token);
-                    }
-                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
-                        builder = builder.checksum_algorithm(checksum_algorithm);
-                    }
-                    
-                    // HTTP Client
-                    let http_client = HTTP_CLIENT.read().map_err(|_| {
-                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-                    })?;
-                    if let Some(client) = http_client.as_ref() {
-                        builder = builder.http_client(client.clone());
-                    }
-                    
-                    let acc = builder.build()?;
-                    Ok(core::OperatorBuilder::new(acc).finish())
-                }
-                
-                core::Scheme::Azblob => {
-                    let mut builder = core::services::Azblob::default();
-                    
-                    builder = builder
-                        .container(bucket)
-                        .endpoint(endpoint)
-                        .account_name(access_key_id)
-                        .account_key(secret_access_key);
-                    
-                    // Optional fields
-                    if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
-                        builder = builder.checksum_algorithm(checksum_algorithm);
-                    }
-                    
-                    // HTTP Client
-                    let http_client = HTTP_CLIENT.read().map_err(|_| {
-                        core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-                    })?;
-                    if let Some(client) = http_client.as_ref() {
-                        builder = builder.http_client(client.clone());
-                    }
-                    
-                    let acc = builder.build()?;
-                    Ok(core::OperatorBuilder::new(acc).finish())
-                }
-                
-                v => {
-                    Err(core::Error::new(
-                        core::ErrorKind::Unsupported,
-                        "scheme is not enabled or supported",
-                    )
-                    .with_context("scheme", v))
-                }
-            }
-        }
-    };
-    
-    let mut op = build_result(schema)?;
+    let mut op = build_basic_operator_with_config(schema, config)?;
     
     // 4. Add common layers
     op = op.layer(core::layers::TracingLayer);
@@ -345,7 +230,9 @@ fn build_operator2(
     Ok(op)
 }
 
-/// \brief Construct an operator based on `scheme` and `options`
+/// \brief Construct an operator based on `scheme` and `options` 
+/// 
+/// NOTICE: This interface has been deprecated, please use opendal_operator_new2 instead
 ///
 /// Uses an array of key-value pairs to initialize the operator based on provided `scheme`
 /// and `options`. For each scheme, i.e. Backend, different options could be set, you may

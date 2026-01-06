@@ -425,6 +425,8 @@ pub struct opendal_operator_config {
     pub tenant_id: u64,
     /// Checksum algorithm (e.g., "md5", "crc32c", "crc32")
     pub checksum_algorithm: *const c_char,
+    /// Trace Id, thread local in oceanbase, long lifecycle
+    pub trace_id: *const c_char,
     
     // === S3-specific configuration ===
     /// AWS Region (S3 only)
@@ -489,6 +491,7 @@ pub extern "C" fn opendal_operator_config_new() -> *mut opendal_operator_config 
             timeout: SINGLE_IO_TIMEOUT_DEFAULT_S,  // Initialize with default value
             session_token: std::ptr::null(),
             tenant_id: DEFAULT_TENANT_ID,  // Initialize with default value
+            trace_id: std::ptr::null(),
             checksum_algorithm: std::ptr::null(),
             region: std::ptr::null(),
             disable_config_load: false,

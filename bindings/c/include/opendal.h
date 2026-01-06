@@ -374,6 +374,10 @@ typedef struct opendal_operator_config {
    */
   const char *checksum_algorithm;
   /**
+   * Trace Id, thread local in oceanbase, long lifecycle
+   */
+  const char *trace_id;
+  /**
    * AWS Region (S3 only)
    */
   const char *region;
@@ -629,6 +633,7 @@ typedef struct opendal_result_operator_deleter {
 typedef struct opendal_async_operator {
   void *inner;
   uint64_t tenant_id;
+  const char *trace_id;
 } opendal_async_operator;
 
 typedef void (*OpenDalAsyncCallbackFn)(struct opendal_error*, int64_t bytes, void *ctx);
@@ -639,6 +644,7 @@ typedef void (*OpenDalAsyncCallbackFn)(struct opendal_error*, int64_t bytes, voi
 typedef struct opendal_async_multipart_writer {
   void *inner;
   uint64_t tenant_id;
+  const char *trace_id;
 } opendal_async_multipart_writer;
 
 /**
@@ -860,6 +866,12 @@ extern "C" {
 
 uint64_t opendal_get_tenant_id(void);
 
+/**
+ * return the c_char pointer of the trace_id, may be null
+ * ownership remains with the TRACE_ID
+ */
+const char *opendal_get_trace_id(void);
+
 void opendal_register_retry_timeout_fn(void *retry_timeout_ms_fn);
 
 /**
@@ -1058,6 +1070,8 @@ void opendal_operator_free(const struct opendal_operator *ptr);
 
 /**
  * \brief Construct an operator based on `scheme` and `options`
+ *
+ * NOTICE: This interface has been deprecated, please use opendal_operator_new2 instead
  *
  * Uses an array of key-value pairs to initialize the operator based on provided `scheme`
  * and `options`. For each scheme, i.e. Backend, different options could be set, you may

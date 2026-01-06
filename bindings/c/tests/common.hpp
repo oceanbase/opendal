@@ -128,6 +128,10 @@ static inline void parse_service_arg(int &argc, char **argv)
       argv[write_idx++] = argv[i];
     }
   }
+
+  if (cfg.service_.empty()) {
+    cfg.service_ = "s3";
+  }
   argc = write_idx;
 }
 
@@ -200,7 +204,15 @@ extern "C" void ob_log_handler(const char *level, const char *message)
 {
   // std::cout << "obdal log: " << "[" << level << "] " << message << std::endl;
   std::fstream out("opendal.log", std::ios::out | std::ios::app);
-  out << "[" << level << "] " << message << std::endl;
+  const int64_t tenant_id = opendal_get_tenant_id();
+  const char *trace_id = opendal_get_trace_id();
+  if (trace_id == nullptr) {
+    trace_id = "unknown trace id";
+  }
+  out << "[" << level << "] " 
+      << "[" << tenant_id << "] " 
+      << "[" << std::string(trace_id) << "] " 
+      << message << std::endl;
   out.close();
 }
 
@@ -381,7 +393,14 @@ bool divide_interval_evenly(
 void dump_error(const opendal_error *error) 
 {
   if (error != nullptr) {
+    const int64_t tenant_id = opendal_get_tenant_id();
+    const char *trace_id = opendal_get_trace_id();
+    if (trace_id == nullptr) {
+      trace_id = "unknown trace id";
+    }
     std::cout << "[ERRCODE: " << error->code << " ]" 
+              << "[TENANT_ID: " << tenant_id << "]" 
+              << "[TRACE_ID: " << std::string(trace_id) << "]" 
               << " [MESSAGE: " << std::string((char *) error->message.data, error->message.len) << "]"
               << " [IS_TEMPORARY: " << error->is_temporary << "]"
               << std::endl;
