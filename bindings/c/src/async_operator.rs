@@ -15,26 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
 use std::ffi::c_char;
 use std::ffi::c_void;
+use std::ffi::CString;
 use std::str::FromStr;
 use std::time::Duration;
 
 use ::opendal as core;
 use core::layers::TimeoutLayer;
 use core::Buffer;
-use core::Builder;
-use core::Configurator;
 
 use super::*;
 use crate::common::*;
+use crate::types::opendal_operator_config;
 
 /// 异步操作 operator
 #[repr(C)]
 pub struct opendal_async_operator {
     inner: *mut c_void,
     tenant_id: u64,
+    trace_id: *const c_char,
 }
 
 unsafe impl Sync for opendal_async_operator {}
@@ -50,6 +50,7 @@ impl opendal_async_operator {
     pub unsafe extern "C" fn opendal_async_operator_free(ptr: *const opendal_async_operator) {
         obdal_catch_unwind(|| {
             if !ptr.is_null() {
+                let _ = CString::from_raw((*ptr).trace_id as *mut c_char);
                 drop(Box::from_raw((*ptr).inner as *mut core::Operator));
                 drop(Box::from_raw(ptr as *mut opendal_async_operator));
             }
@@ -63,68 +64,22 @@ impl opendal_async_operator {
     }
 }
 
-fn build_async_operator(
+/// Build async operator from configuration struct (avoid HashMap overhead)
+fn build_async_operator2(
     schema: core::Scheme,
-    map: HashMap<String, String>,
+    config: &opendal_operator_config,
 ) -> core::Result<core::Operator> {
-    let timeout: u64 = map
-        .get("timeout")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(SINGLE_IO_TIMEOUT_DEFAULT_S);
-
-    let retry_max_times: usize = map
-        .get("retry_max_times")
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(RETRY_MAX_TIMES as usize);
-
-    // TODO 简化代码，由于个别 service 没有 http_client 方法，无法直接基于 `Operator::via_iter` 函数修改
-    // 若需要简化，可新建一个包含 http_client 的 trait，并为 oss 和 s3 impl，然后用一个智能指针去接实现了该 trait 的 builder
-    let mut op = match schema {
-        core::Scheme::S3 => {
-            let mut builder: core::services::S3 =
-                core::services::S3Config::from_iter(map)?.into_builder();
-            let http_client = HTTP_CLIENT.read().map_err(|_| {
-                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-            })?;
-            if let Some(client) = http_client.as_ref() {
-                builder = builder.http_client(client.clone());
-            }
-            let acc = builder.build()?;
-            core::OperatorBuilder::new(acc).finish()
-        }
-        core::Scheme::Oss => {
-            let mut builder: core::services::Oss =
-                core::services::OssConfig::from_iter(map)?.into_builder();
-            let http_client = HTTP_CLIENT.read().map_err(|_| {
-                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-            })?;
-            if let Some(client) = http_client.as_ref() {
-                builder = builder.http_client(client.clone());
-            }
-            let acc = builder.build()?;
-            core::OperatorBuilder::new(acc).finish()
-        }
-        core::Scheme::Azblob => {
-            let mut builder: core::services::Azblob =
-                core::services::AzblobConfig::from_iter(map)?.into_builder();
-            let http_client = HTTP_CLIENT.read().map_err(|_| {
-                core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
-            })?;
-            if let Some(client) = http_client.as_ref() {
-                builder = builder.http_client(client.clone());
-            }
-            let acc = builder.build()?;
-            core::OperatorBuilder::new(acc).finish()
-        }
-        v => {
-            return Err(core::Error::new(
-                core::ErrorKind::Unsupported,
-                "scheme is not enabled or supported",
-            )
-            .with_context("scheme", v))
-        }
-    };
-
+    // 1. Validate configuration
+    config.is_valid().map_err(|e| 
+        core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
+    
+    // 2. Extract common configuration (defaults already set in opendal_operator_config_new)
+    let timeout = config.timeout;
+    let retry_max_times = config.retry_max_times as usize;
+    
+    let mut op = build_basic_operator_with_config(schema, config)?;
+    
+    // 4. Add common layers (no BlockingLayer for async operator)
     op = op.layer(core::layers::TracingLayer);
     op = op.layer(
         TimeoutLayer::new()
@@ -133,16 +88,18 @@ fn build_async_operator(
     );
     op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
     op = op.layer(core::layers::ObGuardLayer::new());
+    
     Ok(op)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn opendal_async_operator_new(
     scheme: *const c_char,
-    options: *const opendal_operator_options,
+    config: *const opendal_operator_config,
     async_operator: *mut *mut opendal_async_operator,
 ) -> *mut opendal_error {
     obdal_catch_unwind(|| {
+        // Parse scheme
         let scheme = match c_char_to_str(scheme) {
             Ok(valid_str) => valid_str,
             Err(e) => return e,
@@ -152,19 +109,28 @@ pub unsafe extern "C" fn opendal_async_operator_new(
             Err(e) => return opendal_error::new(e),
         };
 
-        let mut map = HashMap::<String, String>::default();
-        if !options.is_null() {
-            for (k, v) in (*options).deref() {
-                map.insert(k.to_string(), v.to_string());
-            }
+        // Validate config pointer
+        if config.is_null() {
+            return opendal_error::new(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "config is null",
+            ));
         }
-        let tenant_id = get_tenant_id_from_map(&map);
+        
+        let config_ref = &*config;
+        let tenant_id = config_ref.tenant_id;
+        let trace_id = match c_char_to_str(config_ref.trace_id) {
+            Ok(valid_str) => CString::new(valid_str).expect("failed to convert to CString"),
+            Err(e) => return e,
+        };
 
-        match build_async_operator(scheme, map) {
+        // Build async operator using config
+        match build_async_operator2(scheme, config_ref) {
             Ok(op) => {
                 *async_operator = Box::into_raw(Box::new(opendal_async_operator {
                     inner: Box::into_raw(Box::new(op)) as _,
                     tenant_id,
+                    trace_id: trace_id.into_raw(),
                 }));
                 std::ptr::null_mut()
             }
@@ -210,6 +176,7 @@ pub unsafe extern "C" fn opendal_async_operator_write(
                 }
             },
             op.tenant_id,
+            op.trace_id,
         );
         std::ptr::null_mut()
     }).map_or_else(|err| err, |ret| ret);
@@ -280,6 +247,7 @@ pub unsafe extern "C" fn opendal_async_operator_read(
                 }
             },
             op.tenant_id,
+            op.trace_id,
         );
 
         std::ptr::null_mut()
@@ -358,6 +326,7 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_if_match(
                 }
             },
             op.tenant_id,
+            op.trace_id,
         );
 
         std::ptr::null_mut()
@@ -427,6 +396,7 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_worm_check(
                 }
             },
             op.tenant_id,
+            op.trace_id,
         );
         std::ptr::null_mut()
     }).map_or_else(|err| err, |ret| ret);
@@ -449,14 +419,14 @@ pub unsafe extern "C" fn opendal_async_operator_multipart_writer(
             Err(e) => return e,
         };
 
-        let writer = match obdal_block_on(op.deref().ob_multipart_writer(path), op.tenant_id) {
+        let writer = match obdal_block_on(op.deref().ob_multipart_writer(path), op.tenant_id, op.trace_id) {
             Ok(writer) => writer,
             Err(e) => {
                 return opendal_error::new(e);
             }
         };
         *opendal_async_multipart_writer = Box::into_raw(Box::new(
-            opendal_async_multipart_writer::new(writer, op.tenant_id),
+            opendal_async_multipart_writer::new(writer, op.tenant_id, op.trace_id),
         ));
         std::ptr::null_mut()
     })

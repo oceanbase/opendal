@@ -16,6 +16,9 @@
 // under the License.
 
 use std::ffi::c_void;
+use std::ffi::c_char;
+use std::ffi::CString;
+use std::ffi::CStr;
 
 use super::*;
 use ::opendal as core;
@@ -26,6 +29,7 @@ use crate::common::*;
 pub struct opendal_async_multipart_writer {
     inner: *mut c_void,
     tenant_id: u64,
+    trace_id: *const c_char,
 }
 
 impl opendal_async_multipart_writer {
@@ -40,6 +44,7 @@ impl opendal_async_multipart_writer {
     ) {
         obdal_catch_unwind(|| {
             if !ptr.is_null() {
+                let _ = CString::from_raw((*ptr).trace_id as *mut c_char);
                 drop(Box::from_raw((*ptr).inner as *mut core::ObMultipartWriter));
                 drop(Box::from_raw(ptr));
             }
@@ -54,10 +59,14 @@ fn deref_mut_from_inner<'a>(inner: *mut c_void) -> &'a mut core::ObMultipartWrit
 }
 
 impl opendal_async_multipart_writer {
-    pub(crate) fn new(multipart_writer: core::ObMultipartWriter, tenant_id: u64) -> Self {
+    pub(crate) fn new(multipart_writer: core::ObMultipartWriter, tenant_id: u64, trace_id: *const c_char) -> Self {
+        let trace_id = unsafe {
+            CString::new(CStr::from_ptr(trace_id).to_str().unwrap_or_default()).unwrap_or_default().into_raw()
+        };
         Self {
             inner: Box::into_raw(Box::new(multipart_writer)) as _,
             tenant_id,
+            trace_id,
         }
     }
 
@@ -67,8 +76,9 @@ impl opendal_async_multipart_writer {
         &mut self,
     ) -> *mut opendal_error {
         let tenant_id = self.tenant_id;
+        let trace_id = self.trace_id;
         obdal_catch_unwind(|| {
-            match obdal_block_on(self.deref_mut().initiate_part(), tenant_id) {
+            match obdal_block_on(self.deref_mut().initiate_part(), tenant_id, trace_id) {
                 Ok(_) => std::ptr::null_mut(),
                 Err(e) => opendal_error::new(e),
             }
@@ -108,7 +118,7 @@ impl opendal_async_multipart_writer {
                         });
                     }
                 }
-            }, self.tenant_id);
+            }, self.tenant_id, self.trace_id);
         }).map_err(|e| {
             callback(e, 0, ctx);
         });
@@ -120,8 +130,9 @@ impl opendal_async_multipart_writer {
         &mut self,
     ) -> *mut opendal_error {
         let tenant_id = self.tenant_id;
+        let trace_id = self.trace_id;
         obdal_catch_unwind(|| {
-            match obdal_block_on(self.deref_mut().abort(), tenant_id) {
+            match obdal_block_on(self.deref_mut().abort(), tenant_id, trace_id) {
                 Ok(_) => std::ptr::null_mut(),
                 Err(e) => opendal_error::new(e),
             }
@@ -134,8 +145,9 @@ impl opendal_async_multipart_writer {
         &mut self,
     ) -> *mut opendal_error {
         let tenant_id = self.tenant_id;
+        let trace_id = self.trace_id;
         obdal_catch_unwind(|| {
-            match obdal_block_on(self.deref_mut().close(), tenant_id) {
+            match obdal_block_on(self.deref_mut().close(), tenant_id, trace_id) {
                 Ok(_) => std::ptr::null_mut(),
                 Err(e) => opendal_error::new(e),
             }

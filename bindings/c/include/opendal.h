@@ -330,6 +330,76 @@ typedef struct opendal_operator_options {
 } opendal_operator_options;
 
 /**
+ * \brief C++ ABI compatible operator configuration structure
+ *
+ * This structure is designed to avoid HashMap creation overhead.
+ * C++ code can directly populate this struct and pass it to Rust.
+ *
+ * @see opendal_operator_new2 for blocking operator
+ * @see opendal_async_operator_new for async operator
+ * @see opendal_operator_config_new to allocate a new config
+ * @see opendal_operator_config_free to free the config
+ */
+typedef struct opendal_operator_config {
+  /**
+   * Bucket name (S3/OSS) or container name (AzBlob)
+   */
+  const char *bucket;
+  /**
+   * Service endpoint
+   */
+  const char *endpoint;
+  /**
+   * Access Key ID (S3/OSS) or Account Name (AzBlob)
+   */
+  const char *access_key_id;
+  /**
+   * Secret Access Key (S3) / Access Key Secret (OSS) / Account Key (AzBlob)
+   */
+  const char *secret_access_key;
+  /**
+   * Timeout in seconds
+   */
+  uint64_t timeout;
+  /**
+   * Session Token
+   */
+  const char *session_token;
+  /**
+   * Tenant ID
+   */
+  uint64_t tenant_id;
+  /**
+   * Checksum algorithm (e.g., "md5", "crc32c", "crc32")
+   */
+  const char *checksum_algorithm;
+  /**
+   * Trace Id, thread local in oceanbase, long lifecycle
+   */
+  const char *trace_id;
+  /**
+   * AWS Region (S3 only)
+   */
+  const char *region;
+  /**
+   * Disable config loading from environment (S3 only)
+   */
+  bool disable_config_load;
+  /**
+   * Disable EC2 metadata (S3 only)
+   */
+  bool disable_ec2_metadata;
+  /**
+   * Enable virtual host style (S3 only)
+   */
+  bool enable_virtual_host_style;
+  /**
+   * Maximum retry times
+   */
+  uint64_t retry_max_times;
+} opendal_operator_config;
+
+/**
  * \brief The result type returned by opendal's read operation.
  *
  * The result type of read operation in opendal C binding, it contains
@@ -563,6 +633,7 @@ typedef struct opendal_result_operator_deleter {
 typedef struct opendal_async_operator {
   void *inner;
   uint64_t tenant_id;
+  const char *trace_id;
 } opendal_async_operator;
 
 typedef void (*OpenDalAsyncCallbackFn)(struct opendal_error*, int64_t bytes, void *ctx);
@@ -573,6 +644,7 @@ typedef void (*OpenDalAsyncCallbackFn)(struct opendal_error*, int64_t bytes, voi
 typedef struct opendal_async_multipart_writer {
   void *inner;
   uint64_t tenant_id;
+  const char *trace_id;
 } opendal_async_multipart_writer;
 
 /**
@@ -794,6 +866,12 @@ extern "C" {
 
 uint64_t opendal_get_tenant_id(void);
 
+/**
+ * return the c_char pointer of the trace_id, may be null
+ * ownership remains with the TRACE_ID
+ */
+const char *opendal_get_trace_id(void);
+
 void opendal_register_retry_timeout_fn(void *retry_timeout_ms_fn);
 
 /**
@@ -993,6 +1071,8 @@ void opendal_operator_free(const struct opendal_operator *ptr);
 /**
  * \brief Construct an operator based on `scheme` and `options`
  *
+ * NOTICE: This interface has been deprecated, please use opendal_operator_new2 instead
+ *
  * Uses an array of key-value pairs to initialize the operator based on provided `scheme`
  * and `options`. For each scheme, i.e. Backend, different options could be set, you may
  * reference the [documentation](https://opendal.apache.org/docs/category/services/) for
@@ -1031,6 +1111,49 @@ void opendal_operator_free(const struct opendal_operator *ptr);
  */
 struct opendal_result_operator_new opendal_operator_new(const char *scheme,
                                                         const struct opendal_operator_options *options);
+
+/**
+ * \brief Construct an operator based on `scheme` and `config` (optimized version)
+ *
+ * This is an optimized version of opendal_operator_new that avoids HashMap overhead
+ * by directly using a configuration structure. This provides better performance for
+ * operator initialization.
+ *
+ * @param scheme the service scheme you want to specify, e.g. "s3", "oss", "azblob"
+ * @param config the pointer to the configuration structure
+ * @see opendal_operator_config
+ * @see opendal_operator_config_new
+ * @return A valid opendal_result_operator_new with the operator and error fields
+ *
+ * # Example
+ *
+ * ```C
+ * // Allocate a new config
+ * opendal_operator_config *config = opendal_operator_config_new();
+ *
+ * // Set the required fields
+ * config->bucket = "my-bucket";
+ * config->endpoint = "https://s3.amazonaws.com";
+ * config->access_key_id = "my-access-key";
+ * config->secret_access_key = "my-secret-key";
+ * config->region = "us-east-1";
+ *
+ * // Construct the operator based on the config and scheme
+ * opendal_result_operator_new result = opendal_operator_new2("s3", config);
+ * opendal_operator* op = result.op;
+ *
+ * // You can free the config right away since it's copied
+ * opendal_operator_config_free(config);
+ *
+ * // ... your operations
+ * ```
+ *
+ * # Safety
+ *
+ * The only unsafe case is passing invalid pointers to the `scheme` or `config` arguments.
+ */
+struct opendal_result_operator_new opendal_operator_new2(const char *scheme,
+                                                         const struct opendal_operator_config *config);
 
 /**
  * \brief Blocking write raw bytes to `path`.
@@ -1639,7 +1762,7 @@ struct opendal_error *opendal_panic_test(void);
 void opendal_async_operator_free(const struct opendal_async_operator *ptr);
 
 struct opendal_error *opendal_async_operator_new(const char *scheme,
-                                                 const struct opendal_operator_options *options,
+                                                 const struct opendal_operator_config *config,
                                                  struct opendal_async_operator **async_operator);
 
 void opendal_async_operator_write(const struct opendal_async_operator *op,
@@ -1837,6 +1960,28 @@ void opendal_operator_options_free(struct opendal_operator_options *ptr);
 struct ObSpan *ob_new_span(uint64_t tenant_id, const char *trace_id);
 
 void ob_drop_span(struct ObSpan *span);
+
+/**
+ * \brief Construct a new opendal_operator_config on heap
+ *
+ * The returned config is initialized with default values.
+ * You need to set the required fields before using it.
+ *
+ * @return A pointer to newly allocated opendal_operator_config
+ * @see opendal_operator_config_free
+ */
+struct opendal_operator_config *opendal_operator_config_new(void);
+
+/**
+ * \brief Free the heap memory used by opendal_operator_config
+ *
+ * # Safety
+ *
+ * The pointer must be a valid pointer returned by opendal_operator_config_new
+ *
+ * @param ptr The pointer to opendal_operator_config to be freed
+ */
+void opendal_operator_config_free(struct opendal_operator_config *ptr);
 
 /**
  * \brief Path of entry.

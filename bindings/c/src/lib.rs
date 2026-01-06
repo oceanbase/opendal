@@ -79,6 +79,7 @@ pub use result::opendal_result_operator_multipart_writer;
 mod types;
 pub use types::opendal_bytes;
 pub use types::opendal_operator_options;
+pub use types::opendal_operator_config;
 pub use types::opendal_object_tagging;
 
 mod entry;

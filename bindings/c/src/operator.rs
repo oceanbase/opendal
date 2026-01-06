@@ -34,6 +34,7 @@ use core::Configurator;
 
 use super::*;
 use common::*;
+use crate::types::opendal_operator_config;
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -182,7 +183,56 @@ fn build_operator(
     Ok(op)
 }
 
-/// \brief Construct an operator based on `scheme` and `options`
+/// Build operator from configuration struct (avoid HashMap overhead)
+fn build_operator2(
+    schema: core::Scheme,
+    config: &opendal_operator_config,
+) -> core::Result<core::Operator> {
+    // 1. Validate configuration
+    config.is_valid().map_err(|e| 
+        core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
+    
+    // 2. Extract common configuration (defaults already set in opendal_operator_config_new)
+    let timeout = config.timeout;
+    let retry_max_times = config.retry_max_times as usize;
+    let tenant_id = config.tenant_id;
+
+    
+    // 3. Build operator based on scheme - directly call builder methods
+    let mut op = build_basic_operator_with_config(schema, config)?;
+    
+    // 4. Add common layers
+    op = op.layer(core::layers::TracingLayer);
+    op = op.layer(
+        TimeoutLayer::new()
+            .with_timeout(Duration::from_secs(timeout))
+            .with_io_timeout(Duration::from_secs(timeout)),
+    );
+    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
+    op = op.layer(core::layers::ObGuardLayer::new());
+    
+    // 5. Add BlockingLayer if needed (for blocking operator)
+    if !op.info().full_capability().blocking {
+        if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
+            let handle = tokio::runtime::Handle::try_current()
+                .unwrap_or_else(|_| (*runtime).handle().clone());
+            let _guard = handle.enter();
+            let blocking_layer = core::layers::BlockingLayer::create(Some(tenant_id))?;
+            op = op.layer(blocking_layer);
+        } else {
+            return Err(core::Error::new(
+                core::ErrorKind::ConfigInvalid,
+                "failed to get global RUNTIME, obdal env maybe not inited",
+            ));
+        }
+    }
+    
+    Ok(op)
+}
+
+/// \brief Construct an operator based on `scheme` and `options` 
+/// 
+/// NOTICE: This interface has been deprecated, please use opendal_operator_new2 instead
 ///
 /// Uses an array of key-value pairs to initialize the operator based on provided `scheme`
 /// and `options`. For each scheme, i.e. Backend, different options could be set, you may
@@ -267,6 +317,109 @@ pub unsafe extern "C" fn opendal_operator_new(
             },
         }
     });
+    match handle_result(ret) {
+        Ok(ret) => ret,
+        Err(error) => opendal_result_operator_new {
+            op: std::ptr::null_mut(),
+            error,
+        },
+    }
+}
+
+/// \brief Construct an operator based on `scheme` and `config` (optimized version)
+///
+/// This is an optimized version of opendal_operator_new that avoids HashMap overhead
+/// by directly using a configuration structure. This provides better performance for
+/// operator initialization.
+///
+/// @param scheme the service scheme you want to specify, e.g. "s3", "oss", "azblob"
+/// @param config the pointer to the configuration structure
+/// @see opendal_operator_config
+/// @see opendal_operator_config_new
+/// @return A valid opendal_result_operator_new with the operator and error fields
+///
+/// # Example
+///
+/// ```C
+/// // Allocate a new config
+/// opendal_operator_config *config = opendal_operator_config_new();
+/// 
+/// // Set the required fields
+/// config->bucket = "my-bucket";
+/// config->endpoint = "https://s3.amazonaws.com";
+/// config->access_key_id = "my-access-key";
+/// config->secret_access_key = "my-secret-key";
+/// config->region = "us-east-1";
+///
+/// // Construct the operator based on the config and scheme
+/// opendal_result_operator_new result = opendal_operator_new2("s3", config);
+/// opendal_operator* op = result.op;
+///
+/// // You can free the config right away since it's copied
+/// opendal_operator_config_free(config);
+///
+/// // ... your operations
+/// ```
+///
+/// # Safety
+///
+/// The only unsafe case is passing invalid pointers to the `scheme` or `config` arguments.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_new2(
+    scheme: *const c_char,
+    config: *const opendal_operator_config,
+) -> opendal_result_operator_new {
+    let ret = catch_unwind(|| {
+        // Parse scheme
+        let scheme = match c_char_to_str(scheme) {
+            Ok(valid_str) => valid_str,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: e,
+                };
+            }
+        };
+        let scheme = match core::Scheme::from_str(scheme) {
+            Ok(s) => s,
+            Err(e) => {
+                return opendal_result_operator_new {
+                    op: std::ptr::null_mut(),
+                    error: opendal_error::new(e),
+                };
+            }
+        };
+        
+        // Validate config pointer
+        if config.is_null() {
+            return opendal_result_operator_new {
+                op: std::ptr::null_mut(),
+                error: opendal_error::new(core::Error::new(
+                    core::ErrorKind::ConfigInvalid,
+                    "config is null",
+                )),
+            };
+        }
+        
+        let config_ref = &*config;
+        let tenant_id = config_ref.tenant_id;
+        
+        // Build operator using config
+        match build_operator2(scheme, config_ref) {
+            Ok(op) => opendal_result_operator_new {
+                op: Box::into_raw(Box::new(opendal_operator {
+                    inner: Box::into_raw(Box::new(op.blocking())) as _,
+                    tenant_id,
+                })),
+                error: std::ptr::null_mut(),
+            },
+            Err(e) => opendal_result_operator_new {
+                op: std::ptr::null_mut(),
+                error: opendal_error::new(e),
+            },
+        }
+    });
+    
     match handle_result(ret) {
         Ok(ret) => ret,
         Err(error) => opendal_result_operator_new {

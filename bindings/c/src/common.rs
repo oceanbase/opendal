@@ -18,11 +18,10 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, c_void, CString, CStr};
 use std::fmt::Write;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::slice::from_raw_parts;
 use std::sync::Once;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -47,6 +46,7 @@ use ::opendal as core;
 use core::layers::{DEFAULT_TENANT_ID, RETRY_TIMEOUT, TASK_START_TIME, TENANT_ID, RETRY_TIMEOUT_DEFAULT};
 use core::raw::HttpClient;
 use core::ErrorKind;
+use core::Builder;
 
 // used for async io callback
 pub type OpenDalAsyncCallbackFn =
@@ -205,6 +205,19 @@ pub extern "C" fn opendal_get_tenant_id() -> u64 {
         }
     }
     tenant_id
+}
+
+/// return the c_char pointer of the trace_id, may be null
+/// ownership remains with the TRACE_ID
+#[no_mangle]
+pub extern "C" fn opendal_get_trace_id() -> *const c_char {
+    let mut trace_id = std::ptr::null();
+    let _ = TRACE_ID.try_with(|id| {
+        unsafe {
+            trace_id = id.as_ref().map(|id| id.as_ptr()).unwrap_or(std::ptr::null());
+        }
+    });
+    trace_id
 }
 
 #[no_mangle]
@@ -404,6 +417,125 @@ pub extern "C" fn opendal_fin_env() {
     }
 }
 
+pub fn build_basic_operator_with_config(
+    schema: core::Scheme,
+    config: &opendal_operator_config,
+) -> core::Result<core::Operator> {
+    unsafe {
+        let bucket = config.get_str(config.bucket).expect("bucket should not be none");
+        let endpoint = config.get_str(config.endpoint).expect("endpoint should not be none");
+        let access_key_id = config.get_str(config.access_key_id).expect("access_key_id should not be none");
+        let secret_access_key = config.get_str(config.secret_access_key).expect("secret_access_key should not be none");
+        match schema {
+            core::Scheme::S3 => {
+                let mut builder = core::services::S3::default();
+                
+                builder = builder
+                    .bucket(bucket)
+                    .endpoint(endpoint)
+                    .access_key_id(access_key_id)
+                    .secret_access_key(secret_access_key);
+                
+                // Optional fields
+                if let Some(region) = config.get_str(config.region) {
+                    builder = builder.region(region);
+                }
+                if let Some(session_token) = config.get_str(config.session_token) {
+                    builder = builder.session_token(session_token);
+                }
+                if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                    builder = builder.checksum_algorithm(checksum_algorithm);
+                }
+            
+                // S3-specific configuration
+                if config.disable_config_load {
+                    builder = builder.disable_config_load();
+                }
+                if config.disable_ec2_metadata {
+                    builder = builder.disable_ec2_metadata();
+                }
+                if config.enable_virtual_host_style {
+                    builder = builder.enable_virtual_host_style();
+                }
+                
+                // HTTP Client
+                let http_client = HTTP_CLIENT.read().map_err(|_| {
+                    core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                })?;
+                if let Some(client) = http_client.as_ref() {
+                    builder = builder.http_client(client.clone());
+                }
+                
+                let acc = builder.build()?;
+                Ok(core::OperatorBuilder::new(acc).finish())
+            }
+            
+            core::Scheme::Oss => {
+                let mut builder = core::services::Oss::default();
+                
+                builder = builder
+                    .bucket(bucket)
+                    .endpoint(endpoint)
+                    .access_key_id(access_key_id)
+                    .access_key_secret(secret_access_key);
+                
+                // Optional fields
+                if let Some(session_token) = config.get_str(config.session_token) {
+                    builder = builder.session_token(session_token);
+                }
+                if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                    builder = builder.checksum_algorithm(checksum_algorithm);
+                }
+                
+                // HTTP Client
+                let http_client = HTTP_CLIENT.read().map_err(|_| {
+                    core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                })?;
+                if let Some(client) = http_client.as_ref() {
+                    builder = builder.http_client(client.clone());
+                }
+                
+                let acc = builder.build()?;
+                Ok(core::OperatorBuilder::new(acc).finish())
+            }
+            
+            core::Scheme::Azblob => {
+                let mut builder = core::services::Azblob::default();
+                
+                builder = builder
+                    .container(bucket)
+                    .endpoint(endpoint)
+                    .account_name(access_key_id)
+                    .account_key(secret_access_key);
+                
+                // Optional fields
+                if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
+                    builder = builder.checksum_algorithm(checksum_algorithm);
+                }
+                
+                // HTTP Client
+                let http_client = HTTP_CLIENT.read().map_err(|_| {
+                    core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
+                })?;
+                if let Some(client) = http_client.as_ref() {
+                    builder = builder.http_client(client.clone());
+                }
+                
+                let acc = builder.build()?;
+                Ok(core::OperatorBuilder::new(acc).finish())
+            }
+            
+            v => {
+                Err(core::Error::new(
+                    core::ErrorKind::Unsupported,
+                    "scheme is not enabled or supported",
+                )
+                .with_context("scheme", v))
+            }
+        }
+    }
+}
+
 /// \brief calc md5, return the rust String
 pub fn calc_buffer_md5(buf: &[u8]) -> String {
     let mut hasher = Md5::new();
@@ -523,36 +655,47 @@ pub fn get_retry_timeout() -> Duration {
     }
 }
 
+tokio::task_local! {
+    pub static TRACE_ID: Option<CString>;
+}
+
+fn with_context<F>(tenant_id: u64, trace_id: *const c_char, f: F) -> impl Future<Output = F::Output>
+where 
+    F:Future
+{
+    let trace_id = if trace_id.is_null() {
+        None
+    } else {
+        unsafe {
+            Some(CString::new(CStr::from_ptr(trace_id).to_str().unwrap_or_default()).unwrap_or_default())
+        }
+    };
+    let retry_timeout = get_retry_timeout();
+
+    let f = f.in_current_span();
+    let f = RETRY_TIMEOUT.scope(Some(retry_timeout), f);
+    let f = TASK_START_TIME.scope(Some(Instant::now()), f);
+    let f = TRACE_ID.scope(trace_id, f);
+    let f = TENANT_ID.scope(tenant_id, f);
+    f
+}
+
 /// spawn a future in the tokio runtime, with some task local variables,
 /// like tenant_id and retry_timeout,
 /// may be panic, so if you use it, should be in a obdal_catch_unwind block
-pub fn obdal_spawn(f: impl Future<Output = ()> + Send + 'static, tenant_id: u64) {
-    let retry_timeout = get_retry_timeout();
+pub fn obdal_spawn(f: impl Future<Output = ()> + Send + 'static, tenant_id: u64, trace_id: *const c_char) {
     let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
     let runtime = runtime_guard.as_ref().expect("runtime not initialized");
-    runtime.spawn(TENANT_ID.scope(
-        tenant_id,
-        TASK_START_TIME.scope(
-            Some(Instant::now()),
-            RETRY_TIMEOUT.scope(Some(retry_timeout), f.in_current_span()),
-        ),
-    ));
+    runtime.spawn(with_context(tenant_id, trace_id, f));
 }
 
 /// block on a future in the tokio runtime, with some task local variables,
 /// like tenant_id and retry_timeout,
 /// may be panic, so if you use it, should be in a obdal_catch_unwind block
-pub fn obdal_block_on<'a, T>(f: impl Future<Output = T> + Send + 'a, tenant_id: u64) -> T {
-    let retry_timeout = get_retry_timeout();
+pub fn obdal_block_on<'a, T>(f: impl Future<Output = T> + Send + 'a, tenant_id: u64, trace_id: *const c_char) -> T {
     let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
     let runtime = runtime_guard.as_ref().expect("runtime not initialized");
-    runtime.block_on(TENANT_ID.scope(
-        tenant_id,
-        TASK_START_TIME.scope(
-            Some(Instant::now()),
-            RETRY_TIMEOUT.scope(Some(retry_timeout), f.in_current_span()),
-        ),
-    ))
+    runtime.block_on(with_context(tenant_id, trace_id, f))
 }
 
 #[cfg(test)]
