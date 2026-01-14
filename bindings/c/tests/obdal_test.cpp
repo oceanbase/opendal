@@ -334,52 +334,32 @@ TEST_F(ObDalTest, test_list)
 }
 
 TEST_F(ObDalTest, test_wrong_endpoint) {
+  // prepare wrong endpoint
   const TestConfig &cfg = test_config_instance();
   std::string test_wrong_endpoint = "aa." + cfg.endpoint_;
-  opendal_operator_options *options = opendal_operator_options_new();
+  opendal_operator_config *config = opendal_operator_config_new();
+  ASSERT_EQ(true, cfg.build_config(config));
 
-  if (type_ == S3) {
-    opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
-    opendal_operator_options_set(options, "endpoint",
-                                 test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "region", cfg.region_.c_str());
-    opendal_operator_options_set(options, "access_key_id",
-                                 cfg.access_key_id_.c_str());
-    opendal_operator_options_set(options, "secret_access_key",
-                                 cfg.secret_access_key_.c_str());
-    opendal_operator_options_set(options, "disable_config_load", "true");
-    opendal_operator_options_set(options, "disable_ec2_metadata", "true");
-    opendal_operator_options_set(options, "enable_virtual_host_style", "true");
-  } else if (type_ == OSS) {
-    opendal_operator_options_set(options, "bucket", cfg.bucket_.c_str());
-    opendal_operator_options_set(options, "endpoint",
-                                 test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "access_key_id",
-                                 cfg.access_key_id_.c_str());
-    opendal_operator_options_set(options, "access_key_secret",
-                                 cfg.secret_access_key_.c_str());
-  } else if (type_ == AZBLOB) {
-    opendal_operator_options_set(options, "container", cfg.bucket_.c_str());
+  const char *scheme = get_storage_type_name(type_);
+
+  if (type_ == AZBLOB) {
     test_wrong_endpoint = cfg.endpoint_;
     int pos = test_wrong_endpoint.find("://") + 3;
     ASSERT_TRUE(pos < test_wrong_endpoint.length());
     test_wrong_endpoint = test_wrong_endpoint.substr(0, pos) + "aa." +
                           test_wrong_endpoint.substr(pos);
-    opendal_operator_options_set(options, "endpoint",
-                                 test_wrong_endpoint.c_str());
-    opendal_operator_options_set(options, "account_name",
-                                 cfg.access_key_id_.c_str());
-    opendal_operator_options_set(options, "account_key",
-                                 cfg.secret_access_key_.c_str());
   }
 
-  opendal_result_operator_new tmp_result =
-      opendal_operator_new(get_storage_type_name(type_), options);
+  config->endpoint = test_wrong_endpoint.c_str();
+
+  opendal_result_operator_new tmp_result = opendal_operator_new2(scheme, config);
   dump_error(tmp_result.error);
   ASSERT_TRUE(tmp_result.error == nullptr);
-  opendal_operator_options_free(options);
   opendal_operator *op = tmp_result.op;
   ASSERT_TRUE(op);
+  opendal_operator_config_free(config);
+
+  // prepare wrong endpoint end
 
   std::string path = base_path_ + "test_wrong_endpoint";
   opendal_bytes data = {
@@ -908,6 +888,7 @@ TEST_F(ObDalTest, test_calc_md5)
   ASSERT_EQ(nullptr, result.error);
   opendal_metadata *meta = result.meta;
   char *content_md5 = opendal_metadata_content_md5(meta);
+  ASSERT_TRUE(content_md5 != nullptr);
   ASSERT_TRUE(strcmp(md5, content_md5) == 0);
   opendal_c_char_free(md5);
   opendal_c_char_free(content_md5);

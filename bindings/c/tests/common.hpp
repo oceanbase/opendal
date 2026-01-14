@@ -32,6 +32,11 @@
 #include <string>
 #include <cstdlib>
 #include <fstream>
+#include <sys/stat.h>
+#include <cerrno>
+#include <cstdint>
+
+#include "network_disrupt.hpp"
 
 enum StorageType
 {
@@ -75,7 +80,7 @@ const char *get_storage_type_name(StorageType storage_type)
 struct TestConfig
 {
 public:
-  bool is_valid()
+  bool is_valid() const
   {
     bool ret = true;
     if (service_.empty() || storage_type_ == MAX_TYPE) {
@@ -88,6 +93,34 @@ public:
       if (region_.empty()) {
         ret = false;
       }
+    }
+    return ret;
+  }
+  bool build_config(opendal_operator_config *config) const
+  {
+    bool ret = true;
+    if (!is_valid()) {
+      std::cerr << "TestConfig is not valid" << std::endl;
+      ret = false;
+    } else {
+      config->bucket = bucket_.c_str();
+      config->endpoint = endpoint_.c_str();
+      config->access_key_id = access_key_id_.c_str();
+      config->secret_access_key = secret_access_key_.c_str();
+      if (storage_type_ == S3) {
+        config->region = region_.c_str();
+        config->disable_config_load = true;
+        config->disable_ec2_metadata = true;
+        config->enable_virtual_host_style = true;
+      } else if (storage_type_ == OSS) {
+        config->checksum_algorithm = "md5";
+      } else if (storage_type_ == AZBLOB) {
+        config->checksum_algorithm = "md5";
+      }
+      config->tenant_id = 1003;
+      config->timeout = 5;
+      config->retry_max_times = 3;
+      config->trace_id = "test-trace";
     }
     return ret;
   }
@@ -233,7 +266,7 @@ void my_free(void *ptr)
 }
 
 // the unit is milliseconds
-int64_t get_retry_timeout() 
+int64_t get_retry_timeout_ms() 
 {
   return 20 * 1000;
 }
@@ -414,59 +447,3 @@ void free_error(opendal_error *&error)
     error = nullptr;
   }
 }
-
-static int run_cmd(const std::string &cmd) 
-{
-  const int rc = std::system(cmd.c_str());
-  if (rc != 0) {
-    std::cerr << "[cmd failed] rc=" << rc << " cmd: " << cmd << std::endl;
-  }
-  return rc;
-}
-class DisruptNetwork
-{
-public:
-  DisruptNetwork() 
-  { 
-    pid_ = getpid();
-    is_disrupted_ = false;
-    open_disrupt_network(); 
-  }
-  ~DisruptNetwork() { close_disrupt_network(); }
-
-  bool disrupted() { return is_disrupted_; }
-private:
-  void open_disrupt_network()
-  {
-    /*
-     *                  1:        root qdisc
-     *                /   \
-     *              1:1   1:2     child class  
-     *               |    
-     *              10:   
-     */
-    system("tc qdisc add dev eth0 root handle 1: htb default 30");
-    system("tc class add dev eth0 parent 1: classid 1:1 htb rate 10000mbit");
-    system("tc class add dev eth0 parent 1: classid 1:2 htb rate 10mbit");
-    system("tc filter add dev eth0 parent 1: protocol all prio 1 handle 1: cgroup");
-    system("tc qdisc add dev eth0 parent 1:1 handle 10: netem loss 100%");
-    system("cgcreate -g net_cls:/obdal_cgroup");
-    system("echo 0x00010001 | tee /sys/fs/cgroup/net_cls/obdal_cgroup/net_cls.classid > /dev/null");
-    
-    std::string cmd = std::string("cgclassify -g net_cls:obdal_cgroup ") + std::to_string(pid_);
-
-    assert(system(cmd.c_str()) == 0);
-    is_disrupted_ = true;
-    usleep(50 * 1000);
-  }
-
-  void close_disrupt_network() 
-  {
-    system("tc qdisc del dev eth0 root");
-    is_disrupted_ = false;
-  }
-  
-private:
-  int pid_;
-  bool is_disrupted_;
-};

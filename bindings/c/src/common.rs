@@ -43,7 +43,15 @@ use base64::Engine;
 
 use super::*;
 use ::opendal as core;
-use core::layers::{DEFAULT_TENANT_ID, RETRY_TIMEOUT, TASK_START_TIME, TENANT_ID, RETRY_TIMEOUT_DEFAULT};
+use core::layers::{
+    DEFAULT_TENANT_ID, 
+    RETRY_TIMEOUT, 
+    TASK_START_TIME, 
+    TENANT_ID, 
+    TRACE_ID,
+    RETRY_TIMEOUT_MS_FN,
+    get_retry_timeout_from_ob,
+};
 use core::raw::HttpClient;
 use core::ErrorKind;
 use core::Builder;
@@ -60,10 +68,9 @@ pub type AllocFn = unsafe extern "C" fn(size: usize, align: usize) -> *mut u8;
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
 static mut ALLOC_FN: Option<AllocFn> = None;
 static mut FREE_FN: Option<FreeFn> = None;
-pub type RetryTimeoutFn = unsafe extern "C" fn() -> u64;
 
-// used for get retry timeout param from oceanbase
-static mut RETRY_TIMEOUT_MS_FN: Option<RetryTimeoutFn> = None;
+
+
 pub static SINGLE_IO_TIMEOUT_DEFAULT_S: u64 = 60;
 pub static RETRY_MAX_TIMES: u64 = 10;
 
@@ -645,20 +652,6 @@ pub fn get_tenant_id_from_map(map: &HashMap<String, String>) -> u64 {
         .unwrap_or(DEFAULT_TENANT_ID)
 }
 
-pub fn get_retry_timeout() -> Duration {
-    unsafe {
-        if let Some(retry_timeout_ms_fn) = RETRY_TIMEOUT_MS_FN {
-            Duration::from_millis(retry_timeout_ms_fn())
-        } else {
-            RETRY_TIMEOUT_DEFAULT
-        }
-    }
-}
-
-tokio::task_local! {
-    pub static TRACE_ID: Option<CString>;
-}
-
 fn with_context<F>(tenant_id: u64, trace_id: *const c_char, f: F) -> impl Future<Output = F::Output>
 where 
     F:Future
@@ -670,7 +663,7 @@ where
             Some(CString::new(CStr::from_ptr(trace_id).to_str().unwrap_or_default()).unwrap_or_default())
         }
     };
-    let retry_timeout = get_retry_timeout();
+    let retry_timeout = get_retry_timeout_from_ob();
 
     let f = f.in_current_span();
     let f = RETRY_TIMEOUT.scope(Some(retry_timeout), f);

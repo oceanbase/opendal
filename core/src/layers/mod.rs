@@ -43,8 +43,12 @@ pub use timeout::TimeoutLayer;
 mod blocking;
 #[cfg(feature = "layers-blocking")]
 pub use blocking::BlockingLayer;
+#[cfg(feature = "layers-blocking")]
 pub use blocking::DEFAULT_TENANT_ID;
+#[cfg(feature = "layers-blocking")]
 pub use blocking::TENANT_ID;
+#[cfg(feature = "layers-blocking")]
+pub use blocking::TRACE_ID;
 
 #[cfg(feature = "layers-chaos")]
 mod chaos;
@@ -81,6 +85,8 @@ pub use self::retry::RetryLayer;
 pub use self::retry::RETRY_TIMEOUT;
 pub use self::retry::TASK_START_TIME;
 pub use self::retry::RETRY_TIMEOUT_DEFAULT;
+pub use self::retry::RETRY_TIMEOUT_MS_FN;
+pub use self::retry::get_retry_timeout_from_ob;
 
 #[cfg(feature = "layers-obguard")]
 mod obguard;
