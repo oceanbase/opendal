@@ -22,7 +22,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use ::opendal as core;
-use core::layers::TimeoutLayer;
+use core::layers::{ObGuardLayer, RetryLayer, TimeoutLayer, TracingLayer};
 use core::Buffer;
 
 use super::*;
@@ -70,25 +70,30 @@ fn build_async_operator(
     config: &opendal_operator_config,
 ) -> core::Result<core::Operator> {
     // 1. Validate configuration
-    config.is_valid().map_err(|e| 
-        core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
-    
+    config
+        .is_valid()
+        .map_err(|e| core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
+
     // 2. Extract common configuration (defaults already set in opendal_operator_config_new)
     let timeout = config.timeout;
     let retry_max_times = config.retry_max_times as usize;
-    
+
     let mut op = build_basic_operator_with_config(schema, config)?;
-    
+
     // 4. Add common layers (no BlockingLayer for async operator)
-    op = op.layer(core::layers::TracingLayer);
+    op = op.layer(TracingLayer);
     op = op.layer(
         TimeoutLayer::new()
             .with_timeout(Duration::from_secs(timeout))
             .with_io_timeout(Duration::from_secs(timeout)),
     );
-    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
-    op = op.layer(core::layers::ObGuardLayer::new());
-    
+    op = op.layer(
+        RetryLayer::new()
+            .with_max_times(retry_max_times)
+            .with_min_delay(Duration::from_micros(config.retry_min_delay_us)),
+    );
+    op = op.layer(ObGuardLayer::new());
+
     Ok(op)
 }
 
@@ -116,7 +121,7 @@ pub unsafe extern "C" fn opendal_async_operator_new(
                 "config is null",
             ));
         }
-        
+
         let config_ref = &*config;
         let tenant_id = config_ref.tenant_id;
         let trace_id = match c_char_to_str(config_ref.trace_id) {
@@ -163,7 +168,6 @@ pub unsafe extern "C" fn opendal_async_operator_write(
                 let length = buffer.len() as i64;
                 let ret = op.deref().write(path, buffer).await;
 
-                tracing::info!("write result: {:?}", ret);
                 unsafe {
                     match ret {
                         Ok(_) => {
@@ -179,7 +183,8 @@ pub unsafe extern "C" fn opendal_async_operator_write(
             op.trace_id,
         );
         std::ptr::null_mut()
-    }).map_or_else(|err| err, |ret| ret);
+    })
+    .map_or_else(|err| err, |ret| ret);
     if !err.is_null() {
         callback(err, 0, ctx);
     }
@@ -233,7 +238,10 @@ pub unsafe extern "C" fn opendal_async_operator_read(
                         }
                         unsafe {
                             use bytes::Buf;
-                            buffer.copy_to_slice(std::slice::from_raw_parts_mut(buf_clone as *mut u8, read_len));
+                            buffer.copy_to_slice(std::slice::from_raw_parts_mut(
+                                buf_clone as *mut u8,
+                                read_len,
+                            ));
                         }
                         callback_clone(
                             std::ptr::null_mut(),
@@ -291,22 +299,29 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_if_match(
                     .await;
 
                 if ret.is_err() {
-                    tracing::warn!("failed to write with if not exists: {}", ret.as_ref().err().unwrap());
+                    tracing::warn!(
+                        "failed to write with if not exists: {}",
+                        ret.as_ref().err().unwrap()
+                    );
                     // Unstable useage
                     // please notice that read more one byte to check the content is match
                     // but in some service, the range overflow error will be returned.
                     let read_length = buffer_clone.len() + 1;
-                    match op.deref().read_with(path).range(0 as u64..(read_length as u64)).await {
+                    match op
+                        .deref()
+                        .read_with(path)
+                        .range(0 as u64..(read_length as u64))
+                        .await
+                    {
                         Ok(read_buffer) => {
                             if read_buffer.to_bytes() != buffer_clone.to_bytes() {
                                 ret = Err(core::Error::new(
-                                            core::ErrorKind::ConditionNotMatch,
-                                            "failed to write with if match",
-                                        )
-                                        .with_context("path", path)
-                                        .with_context("write buffer length", buffer_clone.len())
-                                        .with_context("read buffer length", read_buffer.len()),
-                                    );
+                                    core::ErrorKind::ConditionNotMatch,
+                                    "failed to write with if match",
+                                )
+                                .with_context("path", path)
+                                .with_context("write buffer length", buffer_clone.len())
+                                .with_context("read buffer length", read_buffer.len()));
                             } else {
                                 ret = Ok(());
                             }
@@ -370,14 +385,20 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_worm_check(
                                     if md5 == content_md5 {
                                         Ok(())
                                     } else {
-                                        Err(core::Error::new(core::ErrorKind::OverwriteContentMismatch, "worm locked and content md5 not equals")
-                                            .with_context("path", path)
-                                            .with_context("write content md5", &md5)
-                                            .with_context("read content md5", content_md5)
+                                        Err(core::Error::new(
+                                            core::ErrorKind::OverwriteContentMismatch,
+                                            "worm locked and content md5 not equals",
                                         )
+                                        .with_context("path", path)
+                                        .with_context("write content md5", &md5)
+                                        .with_context("read content md5", content_md5))
                                     }
                                 } else {
-                                    Err(core::Error::new(core::ErrorKind::Unexpected, "content md5 is None").with_context("path", path))
+                                    Err(core::Error::new(
+                                        core::ErrorKind::Unexpected,
+                                        "content md5 is None",
+                                    )
+                                    .with_context("path", path))
                                 }
                             }
                             Err(e) => Err(e),
@@ -399,7 +420,8 @@ pub unsafe extern "C" fn opendal_async_operator_write_with_worm_check(
             op.trace_id,
         );
         std::ptr::null_mut()
-    }).map_or_else(|err| err, |ret| ret);
+    })
+    .map_or_else(|err| err, |ret| ret);
 
     if !err.is_null() {
         callback(err, 0, ctx);
@@ -419,7 +441,11 @@ pub unsafe extern "C" fn opendal_async_operator_multipart_writer(
             Err(e) => return e,
         };
 
-        let writer = match obdal_block_on(op.deref().ob_multipart_writer(path), op.tenant_id, op.trace_id) {
+        let writer = match obdal_block_on(
+            op.deref().ob_multipart_writer(path),
+            op.tenant_id,
+            op.trace_id,
+        ) {
             Ok(writer) => writer,
             Err(e) => {
                 return opendal_error::new(e);

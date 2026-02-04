@@ -51,7 +51,6 @@ protected:
     ASSERT_NE(nullptr, ob_span);
     ob_span_ = ob_span;
 
-    opendal_operator_options *options = opendal_operator_options_new();
     opendal_operator_config *config = opendal_operator_config_new();
     TestConfig &cfg = test_config_instance();
     ASSERT_EQ(true, cfg.is_valid());
@@ -69,7 +68,6 @@ protected:
     dump_error(error);
     ASSERT_EQ(nullptr, error);
 
-    opendal_operator_options_free(options);
     opendal_operator_config_free(config);
   }
 

@@ -18,7 +18,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CString, CStr};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::fmt::Write;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -27,6 +27,9 @@ use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use md5::{Digest, Md5};
 use tokio::runtime::Runtime;
 use tracing::Instrument;
 use tracing::{field::Field, level_filters::LevelFilter, span, Event, Subscriber};
@@ -37,24 +40,16 @@ use tracing_subscriber::{
     registry::LookupSpan,
     util::SubscriberInitExt,
 };
-use md5::{Md5, Digest};
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
 
 use super::*;
 use ::opendal as core;
 use core::layers::{
-    DEFAULT_TENANT_ID, 
-    RETRY_TIMEOUT, 
-    TASK_START_TIME, 
-    TENANT_ID, 
-    TRACE_ID,
-    RETRY_TIMEOUT_MS_FN,
-    get_retry_timeout_from_ob,
+    get_retry_timeout_from_ob, DEFAULT_TENANT_ID, RETRY_TIMEOUT, RETRY_TIMEOUT_MS_FN,
+    TASK_START_TIME, TENANT_ID, TRACE_ID,
 };
 use core::raw::HttpClient;
-use core::ErrorKind;
 use core::Builder;
+use core::ErrorKind;
 
 // used for async io callback
 pub type OpenDalAsyncCallbackFn =
@@ -69,10 +64,9 @@ pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
 static mut ALLOC_FN: Option<AllocFn> = None;
 static mut FREE_FN: Option<FreeFn> = None;
 
-
-
 pub static SINGLE_IO_TIMEOUT_DEFAULT_S: u64 = 60;
 pub static RETRY_MAX_TIMES: u64 = 10;
+pub static RETRY_MIN_DELAY_US: u64 = 50_000;
 
 // before enter the tokio runtime, all the memory allocation will use this thread local variable
 thread_local! {
@@ -220,9 +214,10 @@ pub extern "C" fn opendal_get_tenant_id() -> u64 {
 pub extern "C" fn opendal_get_trace_id() -> *const c_char {
     let mut trace_id = std::ptr::null();
     let _ = TRACE_ID.try_with(|id| {
-        unsafe {
-            trace_id = id.as_ref().map(|id| id.as_ptr()).unwrap_or(std::ptr::null());
-        }
+        trace_id = id
+            .as_ref()
+            .map(|id| id.as_ptr())
+            .unwrap_or(std::ptr::null());
     });
     trace_id
 }
@@ -429,20 +424,28 @@ pub fn build_basic_operator_with_config(
     config: &opendal_operator_config,
 ) -> core::Result<core::Operator> {
     unsafe {
-        let bucket = config.get_str(config.bucket).expect("bucket should not be none");
-        let endpoint = config.get_str(config.endpoint).expect("endpoint should not be none");
-        let access_key_id = config.get_str(config.access_key_id).expect("access_key_id should not be none");
-        let secret_access_key = config.get_str(config.secret_access_key).expect("secret_access_key should not be none");
+        let bucket = config
+            .get_str(config.bucket)
+            .expect("bucket should not be none");
+        let endpoint = config
+            .get_str(config.endpoint)
+            .expect("endpoint should not be none");
+        let access_key_id = config
+            .get_str(config.access_key_id)
+            .expect("access_key_id should not be none");
+        let secret_access_key = config
+            .get_str(config.secret_access_key)
+            .expect("secret_access_key should not be none");
         match schema {
             core::Scheme::S3 => {
                 let mut builder = core::services::S3::default();
-                
+
                 builder = builder
                     .bucket(bucket)
                     .endpoint(endpoint)
                     .access_key_id(access_key_id)
                     .secret_access_key(secret_access_key);
-                
+
                 // Optional fields
                 if let Some(region) = config.get_str(config.region) {
                     builder = builder.region(region);
@@ -453,7 +456,7 @@ pub fn build_basic_operator_with_config(
                 if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
                     builder = builder.checksum_algorithm(checksum_algorithm);
                 }
-            
+
                 // S3-specific configuration
                 if config.disable_config_load {
                     builder = builder.disable_config_load();
@@ -464,7 +467,7 @@ pub fn build_basic_operator_with_config(
                 if config.enable_virtual_host_style {
                     builder = builder.enable_virtual_host_style();
                 }
-                
+
                 // HTTP Client
                 let http_client = HTTP_CLIENT.read().map_err(|_| {
                     core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
@@ -472,20 +475,20 @@ pub fn build_basic_operator_with_config(
                 if let Some(client) = http_client.as_ref() {
                     builder = builder.http_client(client.clone());
                 }
-                
+
                 let acc = builder.build()?;
                 Ok(core::OperatorBuilder::new(acc).finish())
             }
-            
+
             core::Scheme::Oss => {
                 let mut builder = core::services::Oss::default();
-                
+
                 builder = builder
                     .bucket(bucket)
                     .endpoint(endpoint)
                     .access_key_id(access_key_id)
                     .access_key_secret(secret_access_key);
-                
+
                 // Optional fields
                 if let Some(session_token) = config.get_str(config.session_token) {
                     builder = builder.session_token(session_token);
@@ -493,7 +496,7 @@ pub fn build_basic_operator_with_config(
                 if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
                     builder = builder.checksum_algorithm(checksum_algorithm);
                 }
-                
+
                 // HTTP Client
                 let http_client = HTTP_CLIENT.read().map_err(|_| {
                     core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
@@ -501,25 +504,25 @@ pub fn build_basic_operator_with_config(
                 if let Some(client) = http_client.as_ref() {
                     builder = builder.http_client(client.clone());
                 }
-                
+
                 let acc = builder.build()?;
                 Ok(core::OperatorBuilder::new(acc).finish())
             }
-            
+
             core::Scheme::Azblob => {
                 let mut builder = core::services::Azblob::default();
-                
+
                 builder = builder
                     .container(bucket)
                     .endpoint(endpoint)
                     .account_name(access_key_id)
                     .account_key(secret_access_key);
-                
+
                 // Optional fields
                 if let Some(checksum_algorithm) = config.get_str(config.checksum_algorithm) {
                     builder = builder.checksum_algorithm(checksum_algorithm);
                 }
-                
+
                 // HTTP Client
                 let http_client = HTTP_CLIENT.read().map_err(|_| {
                     core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
@@ -527,18 +530,16 @@ pub fn build_basic_operator_with_config(
                 if let Some(client) = http_client.as_ref() {
                     builder = builder.http_client(client.clone());
                 }
-                
+
                 let acc = builder.build()?;
                 Ok(core::OperatorBuilder::new(acc).finish())
             }
-            
-            v => {
-                Err(core::Error::new(
-                    core::ErrorKind::Unsupported,
-                    "scheme is not enabled or supported",
-                )
-                .with_context("scheme", v))
-            }
+
+            v => Err(core::Error::new(
+                core::ErrorKind::Unsupported,
+                "scheme is not enabled or supported",
+            )
+            .with_context("scheme", v)),
         }
     }
 }
@@ -653,14 +654,17 @@ pub fn get_tenant_id_from_map(map: &HashMap<String, String>) -> u64 {
 }
 
 fn with_context<F>(tenant_id: u64, trace_id: *const c_char, f: F) -> impl Future<Output = F::Output>
-where 
-    F:Future
+where
+    F: Future,
 {
     let trace_id = if trace_id.is_null() {
         None
     } else {
         unsafe {
-            Some(CString::new(CStr::from_ptr(trace_id).to_str().unwrap_or_default()).unwrap_or_default())
+            Some(
+                CString::new(CStr::from_ptr(trace_id).to_str().unwrap_or_default())
+                    .unwrap_or_default(),
+            )
         }
     };
     let retry_timeout = get_retry_timeout_from_ob();
@@ -676,7 +680,11 @@ where
 /// spawn a future in the tokio runtime, with some task local variables,
 /// like tenant_id and retry_timeout,
 /// may be panic, so if you use it, should be in a obdal_catch_unwind block
-pub fn obdal_spawn(f: impl Future<Output = ()> + Send + 'static, tenant_id: u64, trace_id: *const c_char) {
+pub fn obdal_spawn(
+    f: impl Future<Output = ()> + Send + 'static,
+    tenant_id: u64,
+    trace_id: *const c_char,
+) {
     let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
     let runtime = runtime_guard.as_ref().expect("runtime not initialized");
     runtime.spawn(with_context(tenant_id, trace_id, f));
@@ -685,7 +693,11 @@ pub fn obdal_spawn(f: impl Future<Output = ()> + Send + 'static, tenant_id: u64,
 /// block on a future in the tokio runtime, with some task local variables,
 /// like tenant_id and retry_timeout,
 /// may be panic, so if you use it, should be in a obdal_catch_unwind block
-pub fn obdal_block_on<'a, T>(f: impl Future<Output = T> + Send + 'a, tenant_id: u64, trace_id: *const c_char) -> T {
+pub fn obdal_block_on<'a, T>(
+    f: impl Future<Output = T> + Send + 'a,
+    tenant_id: u64,
+    trace_id: *const c_char,
+) -> T {
     let runtime_guard = RUNTIME.read().expect("failed to lock global RUNTIME");
     let runtime = runtime_guard.as_ref().expect("runtime not initialized");
     runtime.block_on(with_context(tenant_id, trace_id, f))

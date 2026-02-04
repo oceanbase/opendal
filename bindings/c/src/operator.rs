@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use md5::{Md5, Digest};
+use md5::{Digest, Md5};
 use opendal::Buffer;
 
 use std::collections::HashMap;
@@ -28,13 +28,13 @@ use std::time::Duration;
 use tracing::error;
 
 use ::opendal as core;
-use core::layers::TimeoutLayer;
+use core::layers::{BlockingLayer, ObGuardLayer, RetryLayer, TimeoutLayer, TracingLayer};
 use core::Builder;
 use core::Configurator;
 
 use super::*;
-use common::*;
 use crate::types::opendal_operator_config;
+use common::*;
 
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
@@ -92,7 +92,6 @@ impl opendal_operator {
     }
 }
 
-
 fn build_operator(
     schema: core::Scheme,
     map: HashMap<String, String>,
@@ -137,7 +136,7 @@ fn build_operator(
             core::OperatorBuilder::new(acc).finish()
         }
         core::Scheme::Azblob => {
-            let mut builder: core::services::Azblob = 
+            let mut builder: core::services::Azblob =
                 core::services::AzblobConfig::from_iter(map)?.into_builder();
             let http_client = HTTP_CLIENT.read().map_err(|_| {
                 core::Error::new(core::ErrorKind::Unexpected, "failed to get HTTP CLIENT")
@@ -163,7 +162,11 @@ fn build_operator(
             .with_timeout(Duration::from_secs(timeout))
             .with_io_timeout(Duration::from_secs(timeout)),
     );
-    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
+    op = op.layer(
+        core::layers::RetryLayer::new()
+            .with_max_times(retry_max_times)
+            .with_min_delay(Duration::from_micros(RETRY_MIN_DELAY_US)),
+    );
     op = op.layer(core::layers::ObGuardLayer::new());
 
     if !op.info().full_capability().blocking {
@@ -189,9 +192,10 @@ fn build_operator2(
     config: &opendal_operator_config,
 ) -> core::Result<core::Operator> {
     // 1. Validate configuration
-    config.is_valid().map_err(|e| 
-        core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
-    
+    config
+        .is_valid()
+        .map_err(|e| core::Error::new(core::ErrorKind::ConfigInvalid, e))?;
+
     // 2. Extract common configuration (defaults already set in opendal_operator_config_new)
     let timeout = config.timeout;
     let retry_max_times = config.retry_max_times as usize;
@@ -199,23 +203,27 @@ fn build_operator2(
 
     // 3. Build operator based on scheme - directly call builder methods
     let mut op = build_basic_operator_with_config(schema, config)?;
-    
+
     // 4. Add common layers
-    op = op.layer(core::layers::TracingLayer);
+    op = op.layer(TracingLayer);
     op = op.layer(
         TimeoutLayer::new()
             .with_timeout(Duration::from_secs(timeout))
             .with_io_timeout(Duration::from_secs(timeout)),
     );
-    op = op.layer(core::layers::RetryLayer::new().with_max_times(retry_max_times));
-    op = op.layer(core::layers::ObGuardLayer::new());
-    
+    op = op.layer(
+        RetryLayer::new()
+            .with_max_times(retry_max_times)
+            .with_min_delay(Duration::from_micros(config.retry_min_delay_us)),
+    );
+    op = op.layer(ObGuardLayer::new());
+
     // 5. Add BlockingLayer if needed (for blocking operator)
     if !op.info().full_capability().blocking {
         if let Some(runtime) = RUNTIME.read().expect("runtime not initialized").as_ref() {
             let trace_id = match c_char_to_str(config.trace_id) {
                 Ok(valid_str) => CString::new(valid_str).expect("failed to convert to CString"),
-                Err(e) => {
+                Err(_) => {
                     return Err(core::Error::new(
                         core::ErrorKind::ConfigInvalid,
                         "failed to convert trace_id to CString",
@@ -226,7 +234,7 @@ fn build_operator2(
             let handle = tokio::runtime::Handle::try_current()
                 .unwrap_or_else(|_| (*runtime).handle().clone());
             let _guard = handle.enter();
-            let blocking_layer = core::layers::BlockingLayer::create(Some(tenant_id))?.with_trace_id(trace_id);
+            let blocking_layer = BlockingLayer::create(Some(tenant_id))?.with_trace_id(trace_id);
             op = op.layer(blocking_layer);
         } else {
             return Err(core::Error::new(
@@ -235,12 +243,12 @@ fn build_operator2(
             ));
         }
     }
-    
+
     Ok(op)
 }
 
-/// \brief Construct an operator based on `scheme` and `options` 
-/// 
+/// \brief Construct an operator based on `scheme` and `options`
+///
 /// NOTICE: This interface has been deprecated, please use opendal_operator_new2 instead
 ///
 /// Uses an array of key-value pairs to initialize the operator based on provided `scheme`
@@ -352,7 +360,7 @@ pub unsafe extern "C" fn opendal_operator_new(
 /// ```C
 /// // Allocate a new config
 /// opendal_operator_config *config = opendal_operator_config_new();
-/// 
+///
 /// // Set the required fields
 /// config->bucket = "my-bucket";
 /// config->endpoint = "https://s3.amazonaws.com";
@@ -398,7 +406,7 @@ pub unsafe extern "C" fn opendal_operator_new2(
                 };
             }
         };
-        
+
         // Validate config pointer
         if config.is_null() {
             return opendal_result_operator_new {
@@ -409,10 +417,10 @@ pub unsafe extern "C" fn opendal_operator_new2(
                 )),
             };
         }
-        
+
         let config_ref = &*config;
         let tenant_id = config_ref.tenant_id;
-        
+
         // Build operator using config
         match build_operator2(scheme, config_ref) {
             Ok(op) => opendal_result_operator_new {
@@ -428,7 +436,7 @@ pub unsafe extern "C" fn opendal_operator_new2(
             },
         }
     });
-    
+
     match handle_result(ret) {
         Ok(ret) => ret,
         Err(error) => opendal_result_operator_new {
@@ -541,7 +549,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_match(
 pub unsafe extern "C" fn opendal_operator_write_with_if_none_match(
     op: &opendal_operator,
     path: *const c_char,
-    bytes: &opendal_bytes
+    bytes: &opendal_bytes,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
         let _guard = ThreadTenantIdGuard::new(op.tenant_id);
@@ -568,7 +576,7 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_none_match(
 pub unsafe extern "C" fn opendal_operator_write_with_if_not_exists(
     op: &opendal_operator,
     path: *const c_char,
-    bytes: &opendal_bytes
+    bytes: &opendal_bytes,
 ) -> *mut opendal_error {
     let ret = catch_unwind(|| {
         let _guard = ThreadTenantIdGuard::new(op.tenant_id);
@@ -579,7 +587,12 @@ pub unsafe extern "C" fn opendal_operator_write_with_if_not_exists(
             }
         };
 
-        match op.deref().write_with(path, bytes).if_not_exists(true).call() {
+        match op
+            .deref()
+            .write_with(path, bytes)
+            .if_not_exists(true)
+            .call()
+        {
             Ok(_) => std::ptr::null_mut(),
             Err(e) => opendal_error::new(e),
         }
@@ -914,7 +927,10 @@ pub unsafe extern "C" fn opendal_operator_multipart_writer(
         };
 
         opendal_result_operator_multipart_writer {
-            multipart_writer: Box::into_raw(Box::new(opendal_multipart_writer::new(writer, op.tenant_id))),
+            multipart_writer: Box::into_raw(Box::new(opendal_multipart_writer::new(
+                writer,
+                op.tenant_id,
+            ))),
             error: std::ptr::null_mut(),
         }
     });
@@ -1624,16 +1640,21 @@ pub unsafe extern "C" fn opendal_c_char_free(ptr: *mut c_char) {
         if !ptr.is_null() {
             let _ = CString::from_raw(ptr);
         }
-    }).map_or_else(|err| {
-        error!("opendal_c_char_free error: {}", *err);
-        opendal_error::opendal_error_free(err);
-    }, |_| ());
+    })
+    .map_or_else(
+        |err| {
+            error!("opendal_c_char_free error: {}", *err);
+            opendal_error::opendal_error_free(err);
+        },
+        |_| (),
+    );
 }
 
 /// \brief panic test function.
 #[no_mangle]
 pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
-    obdal_catch_unwind(|| {    
+    obdal_catch_unwind(|| {
         panic!("This is a panic message!");
-    }).map_or_else(|err| err, |_| std::ptr::null_mut())
+    })
+    .map_or_else(|err| err, |_| std::ptr::null_mut())
 }

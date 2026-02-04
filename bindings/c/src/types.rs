@@ -22,9 +22,9 @@ use std::panic::AssertUnwindSafe;
 use tracing::{span, span::EnteredSpan, Level};
 
 use super::*;
-use opendal::Buffer;
-use crate::common::{SINGLE_IO_TIMEOUT_DEFAULT_S, RETRY_MAX_TIMES};
+use crate::common::{RETRY_MAX_TIMES, RETRY_MIN_DELAY_US, SINGLE_IO_TIMEOUT_DEFAULT_S};
 use ::opendal::layers::DEFAULT_TENANT_ID;
+use opendal::Buffer;
 
 /// \brief opendal_bytes carries raw-bytes with its length
 ///
@@ -427,7 +427,7 @@ pub struct opendal_operator_config {
     pub checksum_algorithm: *const c_char,
     /// Trace Id, thread local in oceanbase, long lifecycle
     pub trace_id: *const c_char,
-    
+
     // === S3-specific configuration ===
     /// AWS Region (S3 only)
     pub region: *const c_char,
@@ -437,10 +437,12 @@ pub struct opendal_operator_config {
     pub disable_ec2_metadata: bool,
     /// Enable virtual host style (S3 only)
     pub enable_virtual_host_style: bool,
-    
+
     // === Internal fields ===
     /// Maximum retry times
     pub retry_max_times: u64,
+    /// Retry min delay
+    pub retry_min_delay_us: u64,
 }
 
 impl opendal_operator_config {
@@ -459,10 +461,10 @@ impl opendal_operator_config {
         if self.secret_access_key.is_null() {
             return Err("secret_access_key is required".to_string());
         }
-        
+
         Ok(())
     }
-    
+
     /// Helper method: safely convert C string to Rust &str
     pub(crate) unsafe fn get_str<'a>(&self, ptr: *const c_char) -> Option<&'a str> {
         if ptr.is_null() {
@@ -488,16 +490,17 @@ pub extern "C" fn opendal_operator_config_new() -> *mut opendal_operator_config 
             endpoint: std::ptr::null(),
             access_key_id: std::ptr::null(),
             secret_access_key: std::ptr::null(),
-            timeout: SINGLE_IO_TIMEOUT_DEFAULT_S,  // Initialize with default value
+            timeout: SINGLE_IO_TIMEOUT_DEFAULT_S, // Initialize with default value
             session_token: std::ptr::null(),
-            tenant_id: DEFAULT_TENANT_ID,  // Initialize with default value
+            tenant_id: DEFAULT_TENANT_ID, // Initialize with default value
             trace_id: std::ptr::null(),
             checksum_algorithm: std::ptr::null(),
             region: std::ptr::null(),
             disable_config_load: false,
             disable_ec2_metadata: false,
             enable_virtual_host_style: false,
-            retry_max_times: RETRY_MAX_TIMES,  // Initialize with default value
+            retry_max_times: RETRY_MAX_TIMES, // Initialize with default value
+            retry_min_delay_us: RETRY_MIN_DELAY_US, // Initialize with default value
         };
         Box::into_raw(Box::new(config))
     });

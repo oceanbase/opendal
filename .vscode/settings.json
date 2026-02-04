@@ -5,5 +5,9 @@
     "${workspaceFolder}/core/Cargo.toml",
     "${workspaceFolder}/bindings/c/Cargo.toml"
   ],
-  "java.compile.nullAnalysis.mode": "automatic"
+  "java.compile.nullAnalysis.mode": "automatic",
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true 
+  },
 }
