@@ -108,6 +108,9 @@ typedef enum opendal_code {
    * object locked by worm
    */
   OPENDAL_FILE_IMMUTABLE,
+  /**
+   * overwrite content mismatch
+   */
   OPENDAL_OVERWRITE_CONTENT_MISMATCH,
 } opendal_code;
 
@@ -397,6 +400,10 @@ typedef struct opendal_operator_config {
    * Maximum retry times
    */
   uint64_t retry_max_times;
+  /**
+   * Retry min delay
+   */
+  uint64_t retry_min_delay_us;
 } opendal_operator_config;
 
 /**

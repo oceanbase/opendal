@@ -96,5 +96,6 @@ int main(int argc, char **argv)
   // Parse custom schema arg and load envs accordingly, then forward remaining args to gtest
   parse_service_arg(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
+  setenv("OBDAL_TEST_USE_SUDO", "1", true);
   return RUN_ALL_TESTS();
 }

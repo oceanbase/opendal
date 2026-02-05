@@ -166,19 +166,19 @@ impl HttpFetch for reqwest::Client {
                 return Error::new(ErrorKind::InvalidObjectStorageEndpoint, "send http request")
                     .with_operation("http_util::Client::send")
                     .with_context("reqwest error", format!("{err:?}"))
-                    .set_source(err)
+                    .set_source(err);
             } else if is_timeout(&err) {
                 return Error::new(ErrorKind::TimedOut, "send http request")
                     .with_operation("http_util::Client::send")
                     .with_context("reqwest error", format!("{err:?}"))
                     .with_temporary(is_temporary_error(&err))
-                    .set_source(err)
+                    .set_source(err);
             } else {
                 return Error::new(ErrorKind::Unexpected, "send http request")
                     .with_operation("http_util::Client::send")
                     .with_context("reqwest error", format!("{err:?}"))
                     .with_temporary(is_temporary_error(&err))
-                    .set_source(err)
+                    .set_source(err);
             }
         })?;
 
@@ -238,7 +238,24 @@ fn is_temporary_error(err: &reqwest::Error) -> bool {
 
 #[inline]
 fn is_invalid_endpoint(err: &reqwest::Error) -> bool {
-    err.is_request() && format!("{err:?}").contains("Name or service not known")
+    if err.is_request() {
+        if err.to_string().contains("Name or service not known")
+            || err.to_string().contains("Connection refused")
+        {
+            return true;
+        }
+    }
+
+    match err.status() {
+        Some(reqwest::StatusCode::MOVED_PERMANENTLY) => return true,
+        Some(reqwest::StatusCode::FOUND) => return true,
+        Some(reqwest::StatusCode::SEE_OTHER) => return true,
+        Some(reqwest::StatusCode::TEMPORARY_REDIRECT) => return true,
+        Some(reqwest::StatusCode::PERMANENT_REDIRECT) => return true,
+        _ => (),
+    }
+
+    false
 }
 
 #[inline]

@@ -4,8 +4,6 @@ docs/
 
 *.o
 
-Cargo.lock
-
 examples/*
 !examples/
 !examples/*.h

@@ -65,6 +65,7 @@ pub enum opendal_code {
     OPENDAL_PWRITE_OFFSET_NOT_MATCH,
     /// object locked by worm
     OPENDAL_FILE_IMMUTABLE,
+    /// overwrite content mismatch
     OPENDAL_OVERWRITE_CONTENT_MISMATCH,
 }
 

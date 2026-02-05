@@ -83,7 +83,7 @@ target_link_libraries(opendal_c_shared INTERFACE ${OPENDAL_SHARED_LIB})
 target_include_directories(opendal_c_shared INTERFACE include)
 add_dependencies(opendal_c_shared cargo_build)
 
-
+enable_testing()
 
 function(add_obdal_test target_name)
     add_executable(${target_name} ${ARGN})
@@ -93,10 +93,27 @@ function(add_obdal_test target_name)
     message(STATUS "Linking with: ${stdcxx_shared}")
 endfunction()
 
+function(add_test_with_service target_name)
+add_test(NAME ${target_name}_oss COMMAND ${target_name} --service oss)
+    add_test(NAME ${target_name}_s3 COMMAND ${target_name} --service s3)
+    add_test(NAME ${target_name}_azblob COMMAND ${target_name} --service azblob)
+    add_test(NAME ${target_name}_cos COMMAND ${target_name} --service cos)
+    add_test(NAME ${target_name}_obs COMMAND ${target_name} --service obs)
+    add_test(NAME ${target_name}_gcs COMMAND ${target_name} --service gcs)
+    add_test(NAME ${target_name}_bos COMMAND ${target_name} --service bos)
+endfunction()
+
 add_obdal_test(obdal_test tests/obdal_test.h tests/obdal_test.cpp)
 add_obdal_test(obdal_async_test tests/obdal_test.h tests/obdal_async_test.cpp)
 add_obdal_test(obdal_retry_test tests/obdal_retry_test.cpp)
 add_obdal_test(obdal_worm_test tests/obdal_worm_test.cpp)
+
+add_test_with_service(obdal_test)
+add_test_with_service(obdal_async_test)
+
+# Note: The following tests are not added to ctest due to special requirements:
+# - obdal_retry_test: Requires MinIO with IPv4 endpoint configuration
+# - obdal_worm_test: Requires OSS bucket with WORM (Write Once Read Many) policy enabled
 
 if (TEST_ENABLE_ASAN)
     # target_compile_options(tests PRIVATE -fsanitize=address)
