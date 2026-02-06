@@ -18,5 +18,5 @@
 [toolchain]
 # Pin Rust toolchain for building C bindings.
 # This file overrides the workspace root `rust-toolchain.toml` when working under `bindings/c/`.
-channel = "1.83.0"
+channel = "1.88"
 
