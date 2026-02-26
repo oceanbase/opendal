@@ -40,6 +40,11 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let bs = body.copy_to_bytes(body.remaining());
 
     let (mut kind, mut retryable) = match parts.status {
+        StatusCode::MOVED_PERMANENTLY
+        | StatusCode::FOUND
+        | StatusCode::SEE_OTHER
+        | StatusCode::TEMPORARY_REDIRECT
+        | StatusCode::PERMANENT_REDIRECT => (ErrorKind::InvalidObjectStorageEndpoint, false),
         StatusCode::NOT_FOUND => (ErrorKind::NotFound, false),
         StatusCode::FORBIDDEN => (ErrorKind::PermissionDenied, false),
         StatusCode::PRECONDITION_FAILED | StatusCode::NOT_MODIFIED | StatusCode::CONFLICT => {
@@ -59,7 +64,8 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     };
 
     if let Some(oss_err) = oss_err {
-        (kind, retryable) = parse_oss_error_code(oss_err.code.as_str(), oss_err.message.as_str()).unwrap_or((kind, retryable));
+        (kind, retryable) = parse_oss_error_code(oss_err.code.as_str(), oss_err.message.as_str())
+            .unwrap_or((kind, retryable));
     }
 
     let mut err = Error::new(kind, message);
@@ -75,13 +81,13 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
 
 pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     if msg.contains("invalid argument") {
-        return Some((ErrorKind::ConfigInvalid, false))
+        return Some((ErrorKind::ConfigInvalid, false));
     }
     match code {
         "NoSuchBucket" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
         "BucketNameInvalidError" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
         "InvalidDigest" => Some((ErrorKind::ChecksumError, false)),
-        "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)), 
+        "InvalidBucketName" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
         "PositionNotEqualToLength" => Some((ErrorKind::PwriteOffsetNotMatch, false)),

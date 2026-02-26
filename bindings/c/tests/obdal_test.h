@@ -99,7 +99,7 @@ protected:
                                             10, // block thread keep alive time (unit s)
                                             32, // max client count
                                             30,
-                                            10); // max idle time of client (unit s)
+                                            3); // max idle time of client (unit s)
     opendal_register_retry_timeout_fn(reinterpret_cast<void *>(get_retry_timeout_ms));
     ASSERT_EQ(error, nullptr);
     base_path_ = "obdal_test_" + get_formatted_time() + "/";

@@ -38,6 +38,7 @@ pub(crate) struct S3Error {
 pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, body) = resp.into_parts();
     let (mut kind, mut retryable) = match parts.status.as_u16() {
+        301 | 302 | 303 | 307 | 308 => (ErrorKind::InvalidObjectStorageEndpoint, false),
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
         304 | 412 => (ErrorKind::ConditionNotMatch, false),
@@ -56,7 +57,8 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         .unwrap_or_else(|_| (String::from_utf8_lossy(body.chunk()).into_owned(), None));
 
     if let Some(s3_err) = s3_err {
-        (kind, retryable) = parse_s3_error_code(s3_err.code.as_str(), s3_err.message.as_str()).unwrap_or((kind, retryable));
+        (kind, retryable) = parse_s3_error_code(s3_err.code.as_str(), s3_err.message.as_str())
+            .unwrap_or((kind, retryable));
     }
 
     let mut err = Error::new(kind, message);
@@ -72,8 +74,8 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
 
 /// Util function to build [`Error`] from a [`S3Error`] object.
 pub(crate) fn from_s3_error(s3_error: S3Error, parts: Parts) -> Error {
-    let (kind, retryable) =
-        parse_s3_error_code(s3_error.code.as_str(), s3_error.message.as_str()).unwrap_or((ErrorKind::Unexpected, false));
+    let (kind, retryable) = parse_s3_error_code(s3_error.code.as_str(), s3_error.message.as_str())
+        .unwrap_or((ErrorKind::Unexpected, false));
     let mut err = Error::new(kind, format!("{s3_error:?}"));
 
     err = with_error_response_context(err, parts);
@@ -90,18 +92,18 @@ pub(crate) fn from_s3_error(s3_error: S3Error, parts: Parts) -> Error {
 pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     // the msg might be useful in the future.
     if msg.contains("region") && msg.contains("is wrong; expecting") {
-        return Some((ErrorKind::RegionMismatch, false))
+        return Some((ErrorKind::RegionMismatch, false));
     }
     if code == "InvalidRequest" && msg.contains("x-amz-checksum") {
-        return Some((ErrorKind::ChecksumError, false))
+        return Some((ErrorKind::ChecksumError, false));
     }
     if code == "BadDigest" {
-        return Some((ErrorKind::ChecksumError, false))
+        return Some((ErrorKind::ChecksumError, false));
     }
     // in virtual-hosted mode, Invalid Request is returned when use obdal to access
     // cos with a wrong bucket name.
     if code == "InvalidRequest" && msg.contains("<bucketname>-<appid>") {
-        return Some((ErrorKind::InvalidObjectStorageEndpoint, false))
+        return Some((ErrorKind::InvalidObjectStorageEndpoint, false));
     }
     match code {
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),

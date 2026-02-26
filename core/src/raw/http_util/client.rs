@@ -239,20 +239,13 @@ fn is_temporary_error(err: &reqwest::Error) -> bool {
 #[inline]
 fn is_invalid_endpoint(err: &reqwest::Error) -> bool {
     if err.is_request() {
-        if err.to_string().contains("Name or service not known")
-            || err.to_string().contains("Connection refused")
+        let msg = format!("{:?}", err);
+        if msg.contains("Name or service not known")
+            || msg.contains("Connection refused")
+            || msg.contains("tcp connect error")
         {
             return true;
         }
-    }
-
-    match err.status() {
-        Some(reqwest::StatusCode::MOVED_PERMANENTLY) => return true,
-        Some(reqwest::StatusCode::FOUND) => return true,
-        Some(reqwest::StatusCode::SEE_OTHER) => return true,
-        Some(reqwest::StatusCode::TEMPORARY_REDIRECT) => return true,
-        Some(reqwest::StatusCode::PERMANENT_REDIRECT) => return true,
-        _ => (),
     }
 
     false
