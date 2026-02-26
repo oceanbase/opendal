@@ -64,6 +64,11 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let bs = body.copy_to_bytes(body.remaining());
 
     let (mut kind, mut retryable) = match parts.status {
+        StatusCode::MOVED_PERMANENTLY
+        | StatusCode::FOUND
+        | StatusCode::SEE_OTHER
+        | StatusCode::TEMPORARY_REDIRECT
+        | StatusCode::PERMANENT_REDIRECT => (ErrorKind::InvalidObjectStorageEndpoint, false),
         StatusCode::NOT_FOUND => (ErrorKind::NotFound, false),
         StatusCode::FORBIDDEN => (ErrorKind::PermissionDenied, false),
         StatusCode::PRECONDITION_FAILED | StatusCode::NOT_MODIFIED | StatusCode::CONFLICT => {
@@ -82,7 +87,9 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         .unwrap_or_else(|_| (String::from_utf8_lossy(&bs).into_owned(), None));
 
     if let Some(azblob_error) = azblob_error {
-        (kind, retryable) = parse_azblob_error_code(azblob_error.code.as_str(), azblob_error.message.as_str()).unwrap_or((kind, retryable));
+        (kind, retryable) =
+            parse_azblob_error_code(azblob_error.code.as_str(), azblob_error.message.as_str())
+                .unwrap_or((kind, retryable));
     }
 
     // If there is no body here, fill with error code.
@@ -115,16 +122,19 @@ pub fn parse_azblob_error_code(code: &str, message: &str) -> Option<(ErrorKind, 
     match code {
         "AppendPositionConditionNotMet" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
         "OutOfRangeInput" => {
-            if message.contains("The specified resource name length is not within the permissible limits") {
+            if message
+                .contains("The specified resource name length is not within the permissible limits")
+            {
                 Some((ErrorKind::InvalidObjectStorageEndpoint, false))
             } else if message.contains("One of the request inputs is out of range.") {
                 Some((ErrorKind::ConfigInvalid, false))
             } else {
                 None
             }
-        },
-        "InvalidResourceName" 
-        | "ContainerNotFound" => Some((ErrorKind::InvalidObjectStorageEndpoint, false)),
+        }
+        "InvalidResourceName" | "ContainerNotFound" => {
+            Some((ErrorKind::InvalidObjectStorageEndpoint, false))
+        }
         _ => None,
     }
 }
