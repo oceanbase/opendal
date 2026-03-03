@@ -93,6 +93,7 @@ pub fn parse_oss_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> 
         "PositionNotEqualToLength" => Some((ErrorKind::PwriteOffsetNotMatch, false)),
         "QpsLimitExceeded" => Some((ErrorKind::RateLimited, true)),
         "FileImmutable" | "Forbidden by object lock" => Some((ErrorKind::FileImmutable, false)),
+        "ObjectNotAppendable" => Some((ErrorKind::InvalidBlobType, false)),
         _ => None,
     }
 }

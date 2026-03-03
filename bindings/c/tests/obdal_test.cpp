@@ -898,6 +898,91 @@ TEST_F(ObDalTest, test_calc_md5)
   }
 }
 
+// Append-then-put: append blob exists, put same/extended content should succeed (Azblob compat).
+TEST_F(ObDalTest, test_azblob_append_then_put_compat)
+{
+  if (type_ != OSS && type_ != AZBLOB) {
+    return;
+  }
+  std::string path = base_path_ + "append_then_put_compat";
+  const char *content1 = "hello_append_";
+  const char *content2 = "hello_append_tail";
+  const size_t len1 = strlen(content1);
+  const size_t len2 = strlen(content2);
+
+  // 1. Create append blob with content1
+  opendal_result_operator_writer result = opendal_operator_append_writer(op_, path.c_str());
+  ASSERT_FALSE(result.error);
+  opendal_writer *writer = result.writer;
+  ASSERT_TRUE(writer);
+
+  opendal_bytes data1 = { .data = (uint8_t *)content1, .len = len1 };
+  opendal_result_writer_write rw = opendal_writer_write_with_offset(writer, 0, &data1);
+  ASSERT_EQ(nullptr, rw.error);
+  ASSERT_EQ(rw.size, len1);
+
+  opendal_error *err = opendal_writer_close(writer);
+  dump_error(err);
+  ASSERT_EQ(nullptr, err);
+  opendal_writer_free(writer);
+
+  // 2. Put full content (content2 = content1 + "tail") - should succeed via compat
+  opendal_bytes data2 = { .data = (uint8_t *)content2, .len = len2 };
+  err = opendal_operator_write(op_, path.c_str(), &data2);
+  dump_error(err);
+  ASSERT_EQ(nullptr, err);
+
+  // 3. Read back and verify
+  opendal_result_operator_reader r_reader = opendal_operator_reader(op_, path.c_str());
+  ASSERT_EQ(nullptr, r_reader.error);
+  opendal_reader *reader = r_reader.reader;
+  ASSERT_TRUE(reader);
+
+  char buf[64] = {0};
+  opendal_result_reader_read rr = opendal_reader_read(reader, (uint8_t *)buf, len2, 0);
+  ASSERT_EQ(nullptr, rr.error);
+  ASSERT_EQ(rr.size, len2);
+  ASSERT_EQ(0, strncmp(buf, content2, len2));
+
+  opendal_reader_free(reader);
+}
+
+// Put-then-append: block blob exists, append should fail (Azblob: OPENDAL_INVALID_BLOB_TYPE, OSS: OPENDAL_CONDITION_NOT_MATCH).
+TEST_F(ObDalTest, test_put_then_append_invalid_blob_type)
+{
+  if (type_ != OSS && type_ != AZBLOB) {
+    return;
+  }
+  std::string path = base_path_ + "put_then_append_invalid";
+  const char *content = "block_blob_content";
+  const size_t len = strlen(content);
+
+  // 1. Create block blob via put
+  opendal_bytes data = { .data = (uint8_t *)content, .len = len };
+  opendal_error *err = opendal_operator_write(op_, path.c_str(), &data);
+  dump_error(err);
+  ASSERT_EQ(nullptr, err);
+
+  // 2. Try to append - should fail
+  opendal_result_operator_writer result = opendal_operator_append_writer(op_, path.c_str());
+  ASSERT_FALSE(result.error);
+  opendal_writer *writer = result.writer;
+  ASSERT_TRUE(writer);
+
+  opendal_bytes append_data = { .data = (uint8_t *)"_tail", .len = 5 };
+  opendal_result_writer_write rw = opendal_writer_write_with_offset(writer, len, &append_data);
+  ASSERT_NE(nullptr, rw.error);
+  dump_error(rw.error);
+  ASSERT_EQ(OPENDAL_INVALID_BLOB_TYPE, rw.error->code);
+  free_error(rw.error);
+
+  err = opendal_writer_close(writer);
+  if (err) {
+    free_error(err);
+  }
+  opendal_writer_free(writer);
+}
+
 TEST_F(ObDalTest, test_catch_panic)
 {
   opendal_error *error = opendal_panic_test();

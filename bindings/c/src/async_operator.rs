@@ -29,6 +29,50 @@ use super::*;
 use crate::common::*;
 use crate::types::opendal_operator_config;
 
+// Some object stores (e.g. Azblob) do not allow overwriting blobs of different types:
+// a put to an append blob fails because the blob type cannot be changed.
+// To support OceanBase log scenarios without requiring a prior delete, when put fails
+// with InvalidBlobType, we perform a compatibility flow: stat the object, verify the
+// overlapping content matches, then append only the new tail.
+async fn try_append_put_compat_async(
+    op: &core::Operator,
+    path: &str,
+    buffer: &Buffer,
+) -> core::Result<()> {
+    let write_len = buffer.len();
+    let existing_len = op.stat(path).await?.content_length() as usize;
+
+    if existing_len > write_len {
+        return Err(core::Error::new(
+            core::ErrorKind::InvalidBlobType,
+            "put content is shorter than existing content",
+        )
+        .with_context("path", path)
+        .with_context("write buffer length", write_len)
+        .with_context("read buffer length", existing_len));
+    }
+
+    // Azblob allow create a empty appendable file
+    if existing_len > 0 {
+        let read_buf = op.read_with(path).range(0..(existing_len as u64)).await?;
+        if read_buf.to_bytes() != buffer.slice(0..existing_len).to_bytes() {
+            return Err(core::Error::new(
+                core::ErrorKind::OverwriteContentMismatch,
+                "failed to write with append/put compatibility check",
+            )
+            .with_context("path", path)
+            .with_context("write buffer length", write_len)
+            .with_context("read buffer length", existing_len));
+        }
+    }
+
+    if write_len > existing_len {
+        let tail = buffer.slice(existing_len..write_len);
+        op.write_with(path, tail).append(true).await?;
+    }
+    Ok(())
+}
+
 /// 异步操作 operator
 #[repr(C)]
 pub struct opendal_async_operator {
@@ -160,9 +204,14 @@ pub unsafe extern "C" fn opendal_async_operator_write(
             Err(e) => return e,
         };
 
+        let scheme = op.deref().info().scheme();
         let buffer = Buffer::from(bytes);
         let callback_clone = callback.clone();
         let ctx_clone = ctx as usize;
+        let mut buffer2 = Buffer::new();
+        if scheme == core::Scheme::Azblob {
+            buffer2 = Buffer::from(bytes);
+        }
         obdal_spawn(
             async move {
                 let length = buffer.len() as i64;
@@ -174,7 +223,29 @@ pub unsafe extern "C" fn opendal_async_operator_write(
                             callback_clone(std::ptr::null_mut(), length, ctx_clone as *mut c_void);
                         }
                         Err(e) => {
-                            callback_clone(opendal_error::new(e), length, ctx_clone as *mut c_void);
+                            if scheme == core::Scheme::Azblob
+                                && e.kind() == core::ErrorKind::InvalidBlobType
+                            {
+                                match try_append_put_compat_async(op.deref(), path, &buffer2).await
+                                {
+                                    Ok(_) => callback_clone(
+                                        std::ptr::null_mut(),
+                                        length,
+                                        ctx_clone as *mut c_void,
+                                    ),
+                                    Err(compat_err) => callback_clone(
+                                        opendal_error::new(compat_err),
+                                        length,
+                                        ctx_clone as *mut c_void,
+                                    ),
+                                }
+                            } else {
+                                callback_clone(
+                                    opendal_error::new(e),
+                                    length,
+                                    ctx_clone as *mut c_void,
+                                );
+                            }
                         }
                     }
                 }

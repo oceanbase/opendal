@@ -36,6 +36,50 @@ use super::*;
 use crate::types::opendal_operator_config;
 use common::*;
 
+// Some object stores (e.g. Azblob) do not allow overwriting blobs of different types:
+// a put to an append blob fails because the blob type cannot be changed.
+// To support OceanBase log scenarios without requiring a prior delete, when put fails
+// with InvalidBlobType, we perform a compatibility flow: stat the object, verify the
+// overlapping content matches, then append only the new tail.
+fn try_append_put_compat(
+    op: &core::BlockingOperator,
+    path: &str,
+    buffer: &Buffer,
+) -> core::Result<()> {
+    let write_len = buffer.len();
+    let existing_len = op.stat(path)?.content_length() as usize;
+
+    if existing_len > write_len {
+        return Err(core::Error::new(
+            core::ErrorKind::InvalidBlobType,
+            "put content is shorter than existing content",
+        )
+        .with_context("path", path)
+        .with_context("write buffer length", write_len)
+        .with_context("read buffer length", existing_len));
+    }
+
+    // Azblob allow create a empty appendable file
+    if existing_len > 0 {
+        let read_buf = op.read_with(path).range(0..(existing_len as u64)).call()?;
+        if read_buf.to_bytes() != buffer.slice(0..existing_len).to_bytes() {
+            return Err(core::Error::new(
+                core::ErrorKind::OverwriteContentMismatch,
+                "failed to write with append/put compatibility check",
+            )
+            .with_context("path", path)
+            .with_context("write buffer length", write_len)
+            .with_context("read buffer length", existing_len));
+        }
+    }
+
+    if write_len > existing_len {
+        let tail = buffer.slice(existing_len..write_len);
+        op.write_with(path, tail).append(true).call()?;
+    }
+    Ok(())
+}
+
 /// \brief Used to access almost all OpenDAL APIs. It represents an
 /// operator that provides the unified interfaces provided by OpenDAL.
 ///
@@ -502,9 +546,20 @@ pub unsafe extern "C" fn opendal_operator_write(
             }
         };
 
+        let scheme = op.deref().info().scheme();
+
         match op.deref().write(path, bytes) {
             Ok(_) => std::ptr::null_mut(),
-            Err(e) => opendal_error::new(e),
+            Err(e) => {
+                if scheme == core::Scheme::Azblob && e.kind() == core::ErrorKind::InvalidBlobType {
+                    match try_append_put_compat(op.deref(), path, &Buffer::from(bytes)) {
+                        Ok(_) => std::ptr::null_mut(),
+                        Err(compat_err) => opendal_error::new(compat_err),
+                    }
+                } else {
+                    opendal_error::new(e)
+                }
+            }
         }
     });
     match handle_result(ret) {

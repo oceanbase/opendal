@@ -32,9 +32,9 @@
 
 mod common;
 pub use common::c_char_to_str;
+pub use common::dump_panic;
 pub use common::handle_result;
 pub use common::handle_result_without_ret;
-pub use common::dump_panic;
 
 mod error;
 pub use error::opendal_code;
@@ -61,10 +61,13 @@ mod operator_info;
 
 mod result;
 pub use result::opendal_result_exists;
+pub use result::opendal_result_get_object_tagging;
 pub use result::opendal_result_is_exist;
 pub use result::opendal_result_list;
 pub use result::opendal_result_lister_next;
+pub use result::opendal_result_object_tagging_get;
 pub use result::opendal_result_operator_deleter;
+pub use result::opendal_result_operator_multipart_writer;
 pub use result::opendal_result_operator_new;
 pub use result::opendal_result_operator_reader;
 pub use result::opendal_result_operator_writer;
@@ -72,15 +75,12 @@ pub use result::opendal_result_read;
 pub use result::opendal_result_reader_read;
 pub use result::opendal_result_stat;
 pub use result::opendal_result_writer_write;
-pub use result::opendal_result_get_object_tagging;
-pub use result::opendal_result_object_tagging_get;
-pub use result::opendal_result_operator_multipart_writer;
 
 mod types;
 pub use types::opendal_bytes;
-pub use types::opendal_operator_options;
-pub use types::opendal_operator_config;
 pub use types::opendal_object_tagging;
+pub use types::opendal_operator_config;
+pub use types::opendal_operator_options;
 
 mod entry;
 pub use entry::opendal_entry;

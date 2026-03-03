@@ -112,6 +112,10 @@ typedef enum opendal_code {
    * overwrite content mismatch
    */
   OPENDAL_OVERWRITE_CONTENT_MISMATCH,
+  /**
+   * object type doesn't match current operation.
+   */
+  OPENDAL_INVALID_BLOB_TYPE,
 } opendal_code;
 
 /**

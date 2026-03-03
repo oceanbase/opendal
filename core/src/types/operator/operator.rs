@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
-use std::collections::HashMap;
 
 use futures::Stream;
 use futures::StreamExt;
@@ -331,7 +331,7 @@ impl Operator {
     /// TODO 增加注释
     pub fn put_object_tagging_with(
         &self,
-        path: &str
+        path: &str,
     ) -> FuturePutObjTag<impl Future<Output = Result<()>>> {
         let path = normalize_path(path);
 
@@ -349,7 +349,7 @@ impl Operator {
     /// TODO 增加注释
     pub fn get_object_tagging(
         &self,
-        path: &str
+        path: &str,
     ) -> FutureGetObjTag<impl Future<Output = Result<HashMap<String, String>>>> {
         let path = normalize_path(path);
 
@@ -362,7 +362,7 @@ impl Operator {
                 let rp = inner.get_object_tagging(&path).await?;
                 let tag_set = rp.tag_set();
                 Ok(tag_set)
-            }
+            },
         )
     }
 
@@ -994,7 +994,7 @@ impl Operator {
     ///
     pub async fn ob_multipart_writer(&self, path: &str) -> Result<ObMultipartWriter> {
         self.ob_multipart_writer_with(path).await
-    } 
+    }
 
     /// Create a writer for streaming data to the given path with more options.
     ///
@@ -1296,7 +1296,10 @@ impl Operator {
     }
 
     ///
-    pub fn ob_multipart_writer_with(&self, path: &str) -> FutureObMultipartWriter<impl Future<Output = Result<ObMultipartWriter>>> {
+    pub fn ob_multipart_writer_with(
+        &self,
+        path: &str,
+    ) -> FutureObMultipartWriter<impl Future<Output = Result<ObMultipartWriter>>> {
         let path = normalize_path(path);
 
         OperatorFuture::new(
