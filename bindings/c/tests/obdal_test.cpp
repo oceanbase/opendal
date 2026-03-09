@@ -970,7 +970,13 @@ TEST_F(ObDalTest, test_put_then_append_invalid_blob_type)
   ASSERT_TRUE(writer);
 
   opendal_bytes append_data = { .data = (uint8_t *)"_tail", .len = 5 };
-  opendal_result_writer_write rw = opendal_writer_write_with_offset(writer, len, &append_data);
+  opendal_result_writer_write rw = opendal_writer_write_with_offset(writer, 0, &append_data);
+  ASSERT_NE(nullptr, rw.error);
+  dump_error(rw.error);
+  ASSERT_EQ(OPENDAL_INVALID_BLOB_TYPE, rw.error->code);
+  free_error(rw.error);
+
+  rw = opendal_writer_write_with_offset(writer, 2, &append_data);
   ASSERT_NE(nullptr, rw.error);
   dump_error(rw.error);
   ASSERT_EQ(OPENDAL_INVALID_BLOB_TYPE, rw.error->code);
