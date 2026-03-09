@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::fmt::Display;
+use crate::{handle_result_without_ret, types::opendal_bytes};
 use ::opendal as core;
 use opendal::Buffer;
-use crate::{handle_result_without_ret, types::opendal_bytes};
+use std::fmt::Display;
 use std::panic::catch_unwind;
 /// \brief The error code for all opendal APIs in C binding.
 /// \todo The error handling is not complete, the error with error message will be
@@ -51,8 +51,8 @@ pub enum opendal_code {
     /// The range of the content is not satisfied.
     OPENDAL_RANGE_NOT_SATISFIED,
     /// The region name or The bucket name is invalid
-    OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT, 
-    /// This error is retured when the uploaded checksum does not match the checksum 
+    OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
+    /// This error is retured when the uploaded checksum does not match the checksum
     /// calculated from the data accepted by the server.
     OPENDAL_CHECKSUM_ERROR,
     /// OpenDal returns this error to indicate that the region is not correct.
@@ -67,6 +67,8 @@ pub enum opendal_code {
     OPENDAL_FILE_IMMUTABLE,
     /// overwrite content mismatch
     OPENDAL_OVERWRITE_CONTENT_MISMATCH,
+    /// object type doesn't match current operation.
+    OPENDAL_INVALID_BLOB_TYPE,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -84,14 +86,19 @@ impl From<core::ErrorKind> for opendal_code {
             core::ErrorKind::IsSameFile => opendal_code::OPENDAL_IS_SAME_FILE,
             core::ErrorKind::ConditionNotMatch => opendal_code::OPENDAL_CONDITION_NOT_MATCH,
             core::ErrorKind::RangeNotSatisfied => opendal_code::OPENDAL_RANGE_NOT_SATISFIED,
-            core::ErrorKind::InvalidObjectStorageEndpoint => opendal_code::OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT,
+            core::ErrorKind::InvalidObjectStorageEndpoint => {
+                opendal_code::OPENDAL_INVALID_OBJECT_STORAGE_ENDPOINT
+            }
             core::ErrorKind::ChecksumError => opendal_code::OPENDAL_CHECKSUM_ERROR,
             core::ErrorKind::RegionMismatch => opendal_code::OPENDAL_REGION_MISMATCH,
             core::ErrorKind::TimedOut => opendal_code::OPENDAL_TIMED_OUT,
             core::ErrorKind::ChecksumUnsupported => opendal_code::OPENDAL_CHECKSUM_UNSUPPORTED,
             core::ErrorKind::PwriteOffsetNotMatch => opendal_code::OPENDAL_PWRITE_OFFSET_NOT_MATCH,
             core::ErrorKind::FileImmutable => opendal_code::OPENDAL_FILE_IMMUTABLE,
-            core::ErrorKind::OverwriteContentMismatch => opendal_code::OPENDAL_OVERWRITE_CONTENT_MISMATCH,
+            core::ErrorKind::OverwriteContentMismatch => {
+                opendal_code::OPENDAL_OVERWRITE_CONTENT_MISMATCH
+            }
+            core::ErrorKind::InvalidBlobType => opendal_code::OPENDAL_INVALID_BLOB_TYPE,
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
@@ -135,7 +142,11 @@ impl opendal_error {
         let message = opendal_bytes::new(Buffer::from(err.to_string()));
         let is_temporary = err.is_temporary();
 
-        Box::into_raw(Box::new(opendal_error { code, message, is_temporary }))
+        Box::into_raw(Box::new(opendal_error {
+            code,
+            message,
+            is_temporary,
+        }))
     }
 
     /// \brief Frees the opendal_error, ok to call on NULL
@@ -152,6 +163,12 @@ impl opendal_error {
 
 impl Display for opendal_error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "code: {:?}, message: {:?}, is_temporary: {}", self.code, Buffer::from(&self.message), self.is_temporary)
+        write!(
+            f,
+            "code: {:?}, message: {:?}, is_temporary: {}",
+            self.code,
+            Buffer::from(&self.message),
+            self.is_temporary
+        )
     }
 }

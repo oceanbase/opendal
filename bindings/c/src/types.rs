@@ -34,6 +34,7 @@ use opendal::Buffer;
 ///
 /// @see opendal_bytes_free
 #[repr(C)]
+#[derive(Clone)]
 pub struct opendal_bytes {
     /// Pointing to the byte array on heap
     pub data: *mut u8,

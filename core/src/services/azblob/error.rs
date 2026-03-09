@@ -135,6 +135,7 @@ pub fn parse_azblob_error_code(code: &str, message: &str) -> Option<(ErrorKind, 
         "InvalidResourceName" | "ContainerNotFound" => {
             Some((ErrorKind::InvalidObjectStorageEndpoint, false))
         }
+        "InvalidBlobType" => Some((ErrorKind::InvalidBlobType, false)),
         _ => None,
     }
 }

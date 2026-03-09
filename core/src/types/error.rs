@@ -88,7 +88,7 @@ pub enum ErrorKind {
     RangeNotSatisfied,
     /// The region name or The bucket name is invalid.
     InvalidObjectStorageEndpoint,
-    /// This error is retured when the uploaded checksum does not match the checksum 
+    /// This error is retured when the uploaded checksum does not match the checksum
     /// calculated from the data accepted by the server.
     ChecksumError,
     /// OpenDal returns this error to indicate that the region is not correct.
@@ -102,7 +102,9 @@ pub enum ErrorKind {
     /// object locked by worm
     FileImmutable,
     /// overwrite content mismatch, used for worm check
-    OverwriteContentMismatch
+    OverwriteContentMismatch,
+    /// Invalid object type
+    InvalidBlobType,
 }
 
 impl ErrorKind {
@@ -141,6 +143,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::PwriteOffsetNotMatch => "PwriteOffsetNotMatch",
             ErrorKind::FileImmutable => "FileImmutable",
             ErrorKind::OverwriteContentMismatch => "OverwriteContentMismatch",
+            ErrorKind::InvalidBlobType => "InvalidBlobType",
         }
     }
 }
