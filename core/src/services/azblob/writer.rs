@@ -57,7 +57,7 @@ impl oio::AppendWrite for AzblobWriter {
                 let blob_type = headers.get(X_MS_BLOB_TYPE).and_then(|v| v.to_str().ok());
                 if blob_type != Some("AppendBlob") {
                     return Err(Error::new(
-                        ErrorKind::ConditionNotMatch,
+                        ErrorKind::InvalidBlobType,
                         "the blob is not an appendable blob.",
                     ));
                 }
