@@ -240,10 +240,7 @@ fn is_temporary_error(err: &reqwest::Error) -> bool {
 fn is_invalid_endpoint(err: &reqwest::Error) -> bool {
     if err.is_request() {
         let msg = format!("{:?}", err);
-        if msg.contains("Name or service not known")
-            || msg.contains("Connection refused")
-            || msg.contains("tcp connect error")
-        {
+        if msg.contains("Name or service not known") || msg.contains("Connection refused") {
             return true;
         }
     }
