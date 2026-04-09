@@ -17,15 +17,15 @@
 
 use std::sync::Arc;
 
-use super::core::{ListObjectsOutputV1, S3Core};
 use super::core::{ListObjectVersionsOutput, ListObjectsOutput};
+use super::core::{ListObjectsOutputV1, S3Core};
 use super::error::parse_error;
 use crate::raw::oio::PageContext;
-use crate::{raw::*, ErrorKind};
 use crate::EntryMode;
 use crate::Error;
 use crate::Metadata;
 use crate::Result;
+use crate::{raw::*, ErrorKind};
 use bytes::Buf;
 use quick_xml::de;
 
@@ -159,12 +159,12 @@ impl S3ListerV1 {
         path: &str,
         recursive: bool,
         limit: Option<usize>,
-        start_after: Option<&str>, 
+        start_after: Option<&str>,
     ) -> Self {
         let delimiter = if recursive { "" } else { "/" };
         Self {
             core,
-            path: path.to_string(), 
+            path: path.to_string(),
             delimiter,
             limit,
             start_after: start_after.map(String::from),
@@ -184,12 +184,7 @@ impl oio::PageList for S3ListerV1 {
         };
         let resp = self
             .core
-            .s3_list_objects_v1(
-                &self.path,
-                next_marker,
-                self.delimiter,
-                self.limit,
-            )
+            .s3_list_objects_v1(&self.path, next_marker, self.delimiter, self.limit)
             .await?;
 
         if resp.status() != http::StatusCode::OK {
@@ -206,7 +201,7 @@ impl oio::PageList for S3ListerV1 {
             // we allow retries to obtain the correct data.
             .map_err(Error::set_temporary)?;
 
-         // Try our best to check whether this list is done.
+        // Try our best to check whether this list is done.
         //
         // - Check `next_marker`
         ctx.done = if let Some(is_truncated) = output.is_truncated {
@@ -225,11 +220,16 @@ impl oio::PageList for S3ListerV1 {
         if self.delimiter.is_empty() {
             if output.contents.len() > 0 {
                 ctx.token = output.contents.last().unwrap().key.clone();
+            } else if output.next_marker.is_some() {
+                ctx.token = output.next_marker.unwrap().clone();
             }
         } else if output.next_marker.is_some() {
             ctx.token = output.next_marker.unwrap().clone();
         } else if !ctx.done {
-            return Err(Error::new(ErrorKind::Unexpected, "When the list has not yet ended (done is false), next_marker is empty."))
+            return Err(Error::new(
+                ErrorKind::Unexpected,
+                "When the list has not yet ended (done is false), next_marker is empty.",
+            ));
         }
 
         for prefix in output.common_prefixes {
@@ -247,7 +247,8 @@ impl oio::PageList for S3ListerV1 {
                 path = "/".to_string();
             }
 
-            let mut meta = Metadata::new(EntryMode::from_path(&path)).with_content_length(object.size);
+            let mut meta =
+                Metadata::new(EntryMode::from_path(&path)).with_content_length(object.size);
 
             if let Some(etag) = &object.etag {
                 meta.set_etag(etag);
@@ -261,7 +262,6 @@ impl oio::PageList for S3ListerV1 {
         }
 
         Ok(())
-        
     }
 }
 // refer: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html
