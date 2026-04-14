@@ -28,6 +28,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use bytes::Bytes;
 use constants::X_AMZ_META_PREFIX;
+use crc32fast::Hasher;
 use http::header::HeaderName;
 use http::header::CACHE_CONTROL;
 use http::header::CONTENT_DISPOSITION;
@@ -39,13 +40,12 @@ use http::header::IF_NONE_MATCH;
 use http::HeaderValue;
 use http::Request;
 use http::Response;
+use md5::{Digest, Md5};
 use reqsign::AwsCredential;
 use reqsign::AwsCredentialLoad;
 use reqsign::AwsV4Signer;
 use serde::Deserialize;
 use serde::Serialize;
-use md5::{Md5, Digest};
-use crc32fast::Hasher;
 
 use crate::raw::*;
 use crate::*;
@@ -264,29 +264,27 @@ impl S3Core {
     pub async fn calculate_checksum(&self, body: &Buffer) -> Option<String> {
         let checksum_type = self.checksum_algorithm.clone();
         let body_clone = body.clone();
-        let res = tokio::task::spawn_blocking(move || {
-            match checksum_type {
-                None => None,
-                Some(ChecksumAlgorithm::Crc32c) => {
-                    let mut crc = 0u32;
-                    body_clone
-                        .for_each(|b| crc = crc32c::crc32c_append(crc, &b));
-                    Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
-                },
-                Some(ChecksumAlgorithm::Crc32) => {
-                    let mut hasher = Hasher::new();
-                    body_clone.for_each(|b| hasher.update(&b));
-                    let digest = hasher.finalize();
-                    Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
-                },
-                Some(ChecksumAlgorithm::Md5) => {
-                    let mut hasher = Md5::new();
-                    body_clone.for_each(|b| hasher.update(&b));
-                    let digest = hasher.finalize();
-                    Some(BASE64_STANDARD.encode(digest))
-                },
+        let res = tokio::task::spawn_blocking(move || match checksum_type {
+            None => None,
+            Some(ChecksumAlgorithm::Crc32c) => {
+                let mut crc = 0u32;
+                body_clone.for_each(|b| crc = crc32c::crc32c_append(crc, &b));
+                Some(BASE64_STANDARD.encode(crc.to_be_bytes()))
             }
-        }).await;
+            Some(ChecksumAlgorithm::Crc32) => {
+                let mut hasher = Hasher::new();
+                body_clone.for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest.to_be_bytes()))
+            }
+            Some(ChecksumAlgorithm::Md5) => {
+                let mut hasher = Md5::new();
+                body_clone.for_each(|b| hasher.update(&b));
+                let digest = hasher.finalize();
+                Some(BASE64_STANDARD.encode(digest))
+            }
+        })
+        .await;
         res.map_or(None, |s| s)
     }
     pub fn insert_checksum_header(
@@ -670,7 +668,6 @@ impl S3Core {
             queries.push(format!("max-keys={limit}"));
         }
         if !next_marker.is_empty() {
-            let next_marker = build_abs_path(&self.root, &next_marker);
             queries.push(format!("marker={}", percent_encode_path(&next_marker)));
         }
 
@@ -732,7 +729,6 @@ impl S3Core {
             .body(Buffer::new())
             .map_err(new_request_build_error)?;
 
-
         self.sign(&mut req).await?;
 
         self.send(req).await
@@ -760,7 +756,7 @@ impl S3Core {
         if let Some(cache_control) = args.cache_control() {
             req = req.header(CACHE_CONTROL, cache_control)
         }
-        
+
         // access gcs via s3 require this header
         req = req.header(CONTENT_LENGTH, 0);
 
@@ -1175,8 +1171,7 @@ impl From<OpPutObjTag> for Tagging {
     }
 }
 
-#[derive(PartialEq)]
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ChecksumAlgorithm {
     Crc32c,
     Crc32,
@@ -1244,8 +1239,8 @@ mod tests {
         let actual = quick_xml::se::to_string(&tagging).expect("must succeed");
 
         assert!(
-            (actual ==
-            r#"<Tagging>
+            (actual
+                == r#"<Tagging>
             <TagSet>
                <Tag>
                   <Key>key2</Key>
@@ -1257,10 +1252,10 @@ mod tests {
                </Tag>
             </TagSet>
          </Tagging>"#
-                // Cleanup space and new line
-                .replace([' ', '\n'], "")
-        ) || (actual ==
-            r#"<Tagging>
+                    // Cleanup space and new line
+                    .replace([' ', '\n'], ""))
+                || (actual
+                    == r#"<Tagging>
             <TagSet>
                <Tag>
                   <Key>key1</Key>
@@ -1272,8 +1267,9 @@ mod tests {
                </Tag>
             </TagSet>
          </Tagging>"#
-                // Cleanup space and new line
-                .replace([' ', '\n'], "")))
+                        // Cleanup space and new line
+                        .replace([' ', '\n'], ""))
+        )
     }
 
     #[test]

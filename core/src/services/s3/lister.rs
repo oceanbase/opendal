@@ -216,12 +216,19 @@ impl oio::PageList for S3ListerV1 {
         // when build a Lister with recursive = true, the delimiter is set to empty.
         // Therefore，we need to set ctx.token with the key of the last content.
         // reference to: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html
+        // But when the multi-version is enabled in BOS, the contents of list may be empty,
+        // then we need to take next_marker as the token. BOS may fix this compatibility issue later.
         ctx.token = String::new();
         if self.delimiter.is_empty() {
             if output.contents.len() > 0 {
                 ctx.token = output.contents.last().unwrap().key.clone();
             } else if output.next_marker.is_some() {
                 ctx.token = output.next_marker.unwrap().clone();
+            } else if !ctx.done {
+                return Err(Error::new(
+                    ErrorKind::Unexpected,
+                    "contents is empty and next_marker is also empty",
+                ));
             }
         } else if output.next_marker.is_some() {
             ctx.token = output.next_marker.unwrap().clone();
