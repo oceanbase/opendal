@@ -232,11 +232,7 @@ TEST_F(ObDalTest, test_put_then_append_invalid_blob_type)
   opendal_bytes append_data = { .data = (uint8_t *)"_tail", .len = 5 };
   opendal_result_writer_write rw = opendal_writer_write_with_offset(writer, len, &append_data);
   ASSERT_NE(nullptr, rw.error);
-  if (type_ == AZBLOB) {
-    ASSERT_EQ(OPENDAL_INVALID_BLOB_TYPE, rw.error->code);
-  } else {
-    ASSERT_EQ(OPENDAL_CONDITION_NOT_MATCH, rw.error->code);
-  }
+  ASSERT_EQ(OPENDAL_INVALID_BLOB_TYPE, rw.error->code);
   free_error(rw.error);
 
   opendal_error *err = opendal_writer_close(writer);
