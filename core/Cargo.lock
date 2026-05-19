@@ -4175,6 +4175,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "obdal-examples-list-test"
+version = "0.50.1"
+dependencies = [
+ "clap",
+ "futures",
+ "opendal",
+ "tokio",
+]
+
+[[package]]
 name = "obdal-examples-mutli-version-list"
 version = "0.50.1"
 dependencies = [
