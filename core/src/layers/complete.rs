@@ -465,7 +465,7 @@ where
     async fn write_with_offset(&mut self, offset: u64, bs: Buffer) -> Result<()> {
         let w = self.inner.as_mut().ok_or_else(|| {
             Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
-        })?; 
+        })?;
         w.write_with_offset(offset, bs).await
     }
 
@@ -486,7 +486,8 @@ where
         })?;
 
         w.abort().await?;
-        self.inner = None;
+        // OceanBase may be concurrently aborted, while the other thread is still writing,
+        // so we can't set `inner` to `None` here.
 
         Ok(())
     }
@@ -509,7 +510,7 @@ where
             Error::new(ErrorKind::Unexpected, "writer has been closed or aborted")
         })?;
 
-        w.write_with_offset(offset, bs) 
+        w.write_with_offset(offset, bs)
     }
 
     fn close(&mut self) -> Result<()> {
@@ -552,7 +553,7 @@ where
 }
 
 impl<W> oio::ObMultipartWrite for CompleteObMultipartWriter<W>
-where 
+where
     W: oio::ObMultipartWrite
 {
     async fn initiate_part(&mut self) -> Result<()> {
@@ -587,14 +588,13 @@ where
         })?;
 
         w.abort().await?;
-        self.inner = None;
         Ok(())
     }
 }
 
 
 impl<W> oio::BlockingObMultipartWrite for CompleteObMultipartWriter<W>
-where 
+where
     W: oio::BlockingObMultipartWrite
 {
     fn initiate_part(&mut self) -> Result<()> {
