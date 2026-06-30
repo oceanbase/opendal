@@ -51,7 +51,7 @@ mkdir -p $RPM_BUILD_DIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 # 安装依赖
 if [[ "${ARCH}"x == "loongarch64x" ]]; then
     cd $CUR_DIR && mkdir rust && cd rust
-    https://ftp.loongnix.cn/toolchain/rust/rust-1.88/2025-06-27/abi1.0/rust-1.88.0-loongarch64-unknown-linux-gnu.tar.xz
+    wget https://ftp.loongnix.cn/toolchain/rust/rust-1.88/2025-06-27/abi1.0/rust-1.88.0-loongarch64-unknown-linux-gnu.tar.xz
     tar -xf rust-1.88.0-loongarch64-unknown-linux-gnu.tar.xz
     cd rust-1.88.0-loongarch64-unknown-linux-gnu/
     ./install.sh
