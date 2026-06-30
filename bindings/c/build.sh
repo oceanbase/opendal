@@ -10,7 +10,17 @@ ARCH=`uname -p`
 TARGET_DIR_3rd=${CUR_DIR}/deps/3rd
 PKG_DIR=${TARGET_DIR_3rd}/pkg
 mkdir -p $PKG_DIR
-if [[ "${ID}"x != "alinux"x ]]; then
+if [[ "${ARCH}"x == "loongarch64x" ]]; then
+    if [[ ! -d ~/.cargo/bin ]]; then
+        mkdir -p ~/.cargo/bin
+    fi
+    if [[ ! -e ~/.cargo/bin/cargo && ! -L ~/.cargo/bin/cargo ]]; then
+        ln -s /usr/local/bin/cargo ~/.cargo/bin/cargo
+    fi
+    yum install -y gcc gtest-devel cmake gmock-devel
+    export CC=/usr/bin/gcc
+    export CXX=/usr/bin/g++
+elif [[ "${ID}"x != "alinux"x ]]; then
     dep_pkgs=(
         obdevtools-cmake-3.22.1-22022100417.el
         obdevtools-gcc9-9.3.0-52022092914.el

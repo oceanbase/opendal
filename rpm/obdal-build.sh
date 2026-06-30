@@ -22,8 +22,11 @@ BUILD_ENV=""
 
 if [ $# -eq 4 ]; then
     # build type 1
+    OS_ARCH="$(uname -m)"  
     if [[ "${ID}"x == "alinux"x ]]; then
         RELEASE="$4.al8"
+    elif [[ "${OS_ARCH}"x == "loongarch64"x ]]; then
+        RELEASE="$4.an8"
     else
         RELEASE="$4.el${REDHAT}"
     fi
@@ -46,7 +49,22 @@ mkdir -p $PKG_DIR
 rm -rf $RPM_BUILD_DIR
 mkdir -p $RPM_BUILD_DIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 # 安装依赖
-if [[ "${ID}"x != "alinux"x ]]; then
+if [[ "${ARCH}"x == "loongarch64x" ]]; then
+    cd $CUR_DIR && mkdir rust && cd rust
+    wget https://ftp.loongnix.cn/toolchain/rust/rust-1.88/2025-06-27/abi1.0/rust-1.88.0-loongarch64-unknown-linux-gnu.tar.xz
+    tar -xf rust-1.88.0-loongarch64-unknown-linux-gnu.tar.xz
+    cd rust-1.88.0-loongarch64-unknown-linux-gnu/
+    ./install.sh
+    if [[ ! -d ~/.cargo/bin ]]; then
+        mkdir -p ~/.cargo/bin
+    fi
+    if [[ ! -e ~/.cargo/bin/cargo && ! -L ~/.cargo/bin/cargo ]]; then
+        ln -s /usr/local/bin/cargo ~/.cargo/bin/cargo
+    fi
+    yum install -y gcc gtest-devel cmake gmock-devel
+    export CC=/usr/bin/gcc
+    export CXX=/usr/bin/g++
+elif [[ "${ID}"x != "alinux"x ]]; then
     dep_pkgs=(
         obdevtools-cmake-3.22.1-22022100417.el
         obdevtools-gcc9-9.3.0-52022092914.el
