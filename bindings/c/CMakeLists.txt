@@ -34,8 +34,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+EXECUTE_PROCESS(COMMAND uname -m COMMAND tr -d '\n' OUTPUT_VARIABLE ARCHITECTURE)
+
 set(DEP_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/deps/devel")
 set(TOOL_DIR "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/devtools")
+if (${ARCHITECTURE} STREQUAL "loongarch64")
+    set(DEP_DIR "/usr")
+    set(TOOL_DIR "/usr")
+endif()
 message(NOTICE "-- DEP_DIR: ${DEP_DIR}")
 message(NOTICE "-- TOOL_DIR: ${TOOL_DIR}")
 include_directories(
