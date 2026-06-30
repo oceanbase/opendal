@@ -17,7 +17,7 @@ if [[ "${ARCH}"x == "loongarch64x" ]]; then
     if [[ ! -e ~/.cargo/bin/cargo && ! -L ~/.cargo/bin/cargo ]]; then
         ln -s /usr/local/bin/cargo ~/.cargo/bin/cargo
     fi
-    yum install -y gcc gtest-devel cmake
+    yum install -y gcc gtest-devel cmake gmock-devel
     export CC=/usr/bin/gcc
     export CXX=/usr/bin/g++
 elif [[ "${ID}"x != "alinux"x ]]; then
