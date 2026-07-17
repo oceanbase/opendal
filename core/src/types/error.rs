@@ -69,6 +69,8 @@ pub enum ErrorKind {
     AlreadyExists,
     /// Requests that sent to this path is over the limit, please slow down.
     RateLimited,
+    /// The underlying storage doesn't have enough free space to complete the operation.
+    InsufficientStorage,
     /// The given file paths are same.
     IsSameFile,
     /// The condition of this operation is not match.
@@ -132,6 +134,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::NotADirectory => "NotADirectory",
             ErrorKind::AlreadyExists => "AlreadyExists",
             ErrorKind::RateLimited => "RateLimited",
+            ErrorKind::InsufficientStorage => "InsufficientStorage",
             ErrorKind::IsSameFile => "IsSameFile",
             ErrorKind::ConditionNotMatch => "ConditionNotMatch",
             ErrorKind::RangeNotSatisfied => "RangeNotSatisfied",

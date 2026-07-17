@@ -69,6 +69,8 @@ pub enum opendal_code {
     OPENDAL_OVERWRITE_CONTENT_MISMATCH,
     /// object type doesn't match current operation.
     OPENDAL_INVALID_BLOB_TYPE,
+    /// The underlying storage doesn't have enough free space to complete the operation.
+    OPENDAL_INSUFFICIENT_STORAGE,
 }
 
 impl From<core::ErrorKind> for opendal_code {
@@ -99,6 +101,9 @@ impl From<core::ErrorKind> for opendal_code {
                 opendal_code::OPENDAL_OVERWRITE_CONTENT_MISMATCH
             }
             core::ErrorKind::InvalidBlobType => opendal_code::OPENDAL_INVALID_BLOB_TYPE,
+            core::ErrorKind::InsufficientStorage => {
+                opendal_code::OPENDAL_INSUFFICIENT_STORAGE
+            }
             // if this is triggered, check the [`core`] crate and add a
             // new error code accordingly
             _ => unimplemented!(
