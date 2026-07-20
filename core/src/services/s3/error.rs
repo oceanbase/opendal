@@ -48,6 +48,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         // Client Disconnect, we should retry it.
         499 => (ErrorKind::Unexpected, true),
         500 | 502 | 503 | 504 => (ErrorKind::Unexpected, true),
+        507 => (ErrorKind::InsufficientStorage, false),
         110 => (ErrorKind::TimedOut, true),
         _ => (ErrorKind::Unexpected, false),
     };
@@ -132,6 +133,9 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
         // indicates a temporary issue with the service or server, such as high load,
         // maintenance, or an internal problem.
         "ServiceUnavailable" => Some((ErrorKind::Unexpected, true)),
+        // MinIO returns this error when its storage is full or has reached the
+        // minimum free drive threshold.
+        "XMinioStorageFull" => Some((ErrorKind::InsufficientStorage, false)),
         // > The specified bucket does not exist.
         //
         // Although the status code is 404, NoSuchBucket is
@@ -191,5 +195,35 @@ mod tests {
 
         let out: S3Error = de::from_reader(bs.reader()).expect("must success");
         assert_eq!(out, S3Error::default());
+    }
+
+    #[test]
+    fn test_parse_minio_storage_full_error() {
+        let body = Buffer::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>XMinioStorageFull</Code>
+  <Message>Storage backend has reached its minimum free drive threshold.</Message>
+  <Resource>/bucket/object</Resource>
+  <RequestId>test-request-id</RequestId>
+</Error>"#,
+        );
+        let resp = Response::builder().status(507).body(body).unwrap();
+
+        let err = parse_error(resp);
+
+        assert_eq!(err.kind(), ErrorKind::InsufficientStorage);
+        assert!(!err.is_temporary());
+    }
+
+    #[test]
+    fn test_parse_minio_storage_full_error_code() {
+        assert_eq!(
+            parse_s3_error_code(
+                "XMinioStorageFull",
+                "Storage backend has reached its minimum free drive threshold.",
+            ),
+            Some((ErrorKind::InsufficientStorage, false))
+        );
     }
 }

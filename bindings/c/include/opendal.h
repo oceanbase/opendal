@@ -116,6 +116,11 @@ typedef enum opendal_code {
    * object type doesn't match current operation.
    */
   OPENDAL_INVALID_BLOB_TYPE,
+
+  /**
+   * The underlying storage doesn't have enough free space to complete the operation.
+   */
+  OPENDAL_INSUFFICIENT_STORAGE,
 } opendal_code;
 
 /**
