@@ -853,6 +853,57 @@ TEST_F(ObDalTest, test_write_with_if_none_match)
   }
 }
 
+TEST_F(ObDalTest, test_read_with_if_match)
+{
+  std::string path = base_path_ + "read_with_if_match";
+  const char *content = "this_string_length_is_24";
+  opendal_bytes data = {
+    .data = (uint8_t*)content,
+    .len = 24,
+  };
+
+  // 1. Write the object
+  opendal_error *error = opendal_operator_write(op_, path.c_str(), &data);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  // 2. Stat to fetch the real ETag
+  opendal_result_stat stat = opendal_operator_stat(op_, path.c_str());
+  dump_error(stat.error);
+  ASSERT_EQ(nullptr, stat.error);
+  ASSERT_NE(nullptr, stat.meta);
+  char *etag = opendal_metadata_etag(stat.meta);
+  ASSERT_NE(nullptr, etag);
+
+  // 3. Read the whole object with the matching ETag
+  opendal_result_read r = opendal_operator_read_with_if_match(op_, path.c_str(), 24, 0, etag);
+  dump_error(r.error);
+  ASSERT_EQ(nullptr, r.error);
+  ASSERT_EQ(24, r.data.len);
+  ASSERT_EQ(0, strcmp(r.data, content));
+  opendal_bytes_free(&r.data);
+
+  // 4. Read a sub range with the matching ETag
+  r = opendal_operator_read_with_if_match(op_, path.c_str(), 4, 4, etag);
+  dump_error(r.error);
+  ASSERT_EQ(nullptr, r.error);
+  ASSERT_EQ(4, r.data.len);
+  ASSERT_EQ(0, memcmp(r.data.data, content + 4, 4));
+  opendal_bytes_free(&r.data);
+
+  // 5. Read with a mismatched ETag, expect OPENDAL_CONDITION_NOT_MATCH
+  r = opendal_operator_read_with_if_match(op_, path.c_str(), 24, 0, "\"mismatched-etag\"");
+  dump_error(r.error);
+  ASSERT_NE(nullptr, r.error);
+  ASSERT_EQ(OPENDAL_CONDITION_NOT_MATCH, r.error->code);
+  ASSERT_EQ(nullptr, r.data.data);
+  ASSERT_EQ(0, r.data.len);
+  free_error(r.error);
+
+  opendal_c_char_free(etag);
+  opendal_metadata_free(stat.meta);
+}
+
 TEST_F(ObDalTest, test_write_with_if_not_exists)
 {
   std::string path = base_path_ + "write_with_if_not_exists";

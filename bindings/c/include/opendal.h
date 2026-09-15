@@ -1279,6 +1279,51 @@ struct opendal_result_read opendal_operator_read(const struct opendal_operator *
                                                  const char *path);
 
 /**
+ * \brief Blocking read of at most `len` bytes of `path` starting from `offset`.
+ *
+ * @param op The created opendal_operator
+ * @param path Path of the object to read
+ * @param len Read length, must be greater than 0
+ * @param offset Starting byte offset; offset + len must not overflow size_t
+ * @return On success, error is NULL and the actual read length is in data.len;
+ * on failure, data is empty and error points to the error information.
+ *
+ * \note On success, call opendal_bytes_free(&result.data) to free the data;
+ * on failure, call opendal_error_free(result.error) to free the error.
+ *
+ * # Safety
+ *
+ * `path` must point to a valid, NUL-terminated UTF-8 string.
+ */
+struct opendal_result_read opendal_operator_read_with_range(const struct opendal_operator *op,
+                                                            const char *path,
+                                                            uintptr_t len,
+                                                            uintptr_t offset);
+
+/**
+ * \brief Blocking read of the specified range when the ETag matches.
+ *
+ * @param op The created opendal_operator
+ * @param path Path of the object to read
+ * @param len Read length, must be greater than 0
+ * @param offset Starting byte offset; offset + len must not overflow size_t
+ * @param etag If-Match condition; must be non-NULL and is passed to the
+ * storage service as-is
+ * @return The result and memory-freeing rules are the same as
+ * opendal_operator_read_with_range. Returns OPENDAL_CONDITION_NOT_MATCH
+ * when the storage service reports an ETag mismatch.
+ *
+ * # Safety
+ *
+ * `path` and `etag` must point to valid, NUL-terminated UTF-8 strings.
+ */
+struct opendal_result_read opendal_operator_read_with_if_match(const struct opendal_operator *op,
+                                                               const char *path,
+                                                               uintptr_t len,
+                                                               uintptr_t offset,
+                                                               const char *etag);
+
+/**
  * \brief Blocking read the data from `path`.
  *
  * Read the data out from `path` blocking by operator, returns

@@ -426,6 +426,12 @@ impl FunctionRead {
         self
     }
 
+    /// Set the If-Match condition for this read.
+    pub fn if_match(mut self, v: &str) -> Self {
+        self.0 = self.0.map_args(|(args, range)| (args.with_if_match(v), range));
+        self
+    }
+
     /// Call the function to consume all the input and generate a
     /// result.
     pub fn call(self) -> Result<Buffer> {

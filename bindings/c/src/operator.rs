@@ -698,31 +698,90 @@ pub unsafe extern "C" fn opendal_operator_read(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_read {
+    operator_read_impl(op, path, None, None)
+}
+
+/// \brief Blocking read of at most `len` bytes of `path` starting from `offset`.
+///
+/// @param op The created opendal_operator
+/// @param path Path of the object to read
+/// @param len Read length, must be greater than 0
+/// @param offset Starting byte offset; offset + len must not overflow size_t
+/// @return On success, error is NULL and the actual read length is in data.len;
+/// on failure, data is empty and error points to the error information.
+///
+/// \note On success, call opendal_bytes_free(&result.data) to free the data;
+/// on failure, call opendal_error_free(result.error) to free the error.
+///
+/// # Safety
+///
+/// `path` must point to a valid, NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_read_with_range(
+    op: &opendal_operator,
+    path: *const c_char,
+    len: usize,
+    offset: usize,
+) -> opendal_result_read {
+    operator_read_impl(op, path, Some((offset, len)), None)
+}
+
+/// \brief Blocking read of the specified range when the ETag matches.
+///
+/// @param op The created opendal_operator
+/// @param path Path of the object to read
+/// @param len Read length, must be greater than 0
+/// @param offset Starting byte offset; offset + len must not overflow size_t
+/// @param etag If-Match condition; must be non-NULL and is passed to the
+/// storage service as-is
+/// @return The result and memory-freeing rules are the same as
+/// opendal_operator_read_with_range. Returns OPENDAL_CONDITION_NOT_MATCH
+/// when the storage service reports an ETag mismatch.
+///
+/// # Safety
+///
+/// `path` and `etag` must point to valid, NUL-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_read_with_if_match(
+    op: &opendal_operator,
+    path: *const c_char,
+    len: usize,
+    offset: usize,
+    etag: *const c_char,
+) -> opendal_result_read {
+    operator_read_impl(op, path, Some((offset, len)), Some(etag))
+}
+
+fn operator_read_impl(
+    op: &opendal_operator,
+    path: *const c_char,
+    range: Option<(usize, usize)>,
+    etag: Option<*const c_char>,
+) -> opendal_result_read {
     let ret = catch_unwind(|| {
         let _guard = ThreadTenantIdGuard::new(op.tenant_id);
-        let path = match c_char_to_str(path) {
-            Ok(valid_str) => valid_str,
-            Err(e) => {
-                return opendal_result_read {
-                    data: opendal_bytes::empty(),
-                    error: e,
-                };
-            }
-        };
+        let path = c_char_to_str(path)?;
+        let mut read = op.deref().read_with(path);
 
-        match op.deref().read(path) {
-            Ok(b) => opendal_result_read {
-                data: opendal_bytes::new(b),
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_read {
-                data: opendal_bytes::empty(),
-                error: opendal_error::new(e),
-            },
+        if let Some((offset, len)) = range {
+            let end = offset.checked_add(len).filter(|_| len > 0);
+            let end = end.ok_or_else(|| {
+                opendal_error::new(core::Error::new(core::ErrorKind::ConfigInvalid,
+                                                    "invalid read range"))
+            })?;
+            read = read.range((offset as u64)..(end as u64));
         }
+        if let Some(etag) = etag {
+            read = read.if_match(c_char_to_str(etag)?);
+        }
+
+        read.call().map(opendal_bytes::new).map_err(opendal_error::new)
     });
-    match handle_result(ret) {
-        Ok(ret) => ret,
+    match handle_result(ret).and_then(|ret| ret) {
+        Ok(data) => opendal_result_read {
+            data,
+            error: std::ptr::null_mut(),
+        },
         Err(error) => opendal_result_read {
             data: opendal_bytes::empty(),
             error,
@@ -1712,4 +1771,209 @@ pub unsafe extern "C" fn opendal_panic_test() -> *mut opendal_error {
         panic!("This is a panic message!");
     })
     .map_or_else(|err| err, |_| std::ptr::null_mut())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use ::opendal as core;
+    use core::raw::{Access, AccessorInfo, OpRead, OpStat, RpRead, RpStat};
+
+    use super::*;
+
+    const DATA: &[u8] = b"0123456789";
+    const ETAG: &str = "\"opaque-etag/+/==\"";
+    const TENANT: u64 = 1003;
+
+    #[derive(Debug)]
+    struct MockRead;
+
+    impl Access for MockRead {
+        type Reader = ();
+        type Writer = ();
+        type ObMultipartWriter = ();
+        type Lister = ();
+        type Deleter = ();
+        type BlockingReader = Buffer;
+        type BlockingWriter = ();
+        type BlockingObMultipartWriter = ();
+        type BlockingLister = ();
+        type BlockingDeleter = ();
+
+        fn info(&self) -> Arc<AccessorInfo> {
+            let mut info = AccessorInfo::default();
+            info.set_native_capability(core::Capability {
+                read: true,
+                stat: true,
+                blocking: true,
+                read_with_if_match: true,
+                ..Default::default()
+            });
+            Arc::new(info)
+        }
+
+        fn blocking_stat(&self, _: &str, _: OpStat) -> core::Result<RpStat> {
+            Ok(RpStat::new(
+                core::Metadata::new(core::EntryMode::FILE)
+                    .with_content_length(DATA.len() as u64),
+            ))
+        }
+
+        fn blocking_read(
+            &self,
+            path: &str,
+            args: OpRead,
+        ) -> core::Result<(RpRead, Buffer)> {
+            assert_eq!(path, "object");
+            assert_eq!(opendal_get_tenant_id(), TENANT);
+            if args.if_match().is_some_and(|etag| etag != ETAG) {
+                return Err(core::Error::new(
+                    core::ErrorKind::ConditionNotMatch,
+                    "etag mismatch",
+                ));
+            }
+            let range = args.range();
+            let start = range.offset() as usize;
+            let end = start + range.size().unwrap() as usize;
+            Ok((
+                RpRead::new(),
+                Buffer::from(
+                    DATA[start.min(DATA.len())..end.min(DATA.len())].to_vec(),
+                ),
+            ))
+        }
+    }
+
+    fn with_operator(test: impl FnOnce(&opendal_operator)) {
+        let tenant = opendal_get_tenant_id();
+        let inner = core::OperatorBuilder::new(MockRead).finish().blocking();
+        let op = Box::into_raw(Box::new(opendal_operator {
+            inner: Box::into_raw(Box::new(inner)) as *mut c_void,
+            tenant_id: TENANT,
+        }));
+        unsafe {
+            test(&*op);
+            opendal_operator::opendal_operator_free(op);
+        }
+        assert_eq!(opendal_get_tenant_id(), tenant);
+    }
+
+    fn expect_data(mut result: opendal_result_read, expected: &[u8]) {
+        assert!(result.error.is_null());
+        unsafe {
+            let actual =
+                std::slice::from_raw_parts(result.data.data, result.data.len);
+            assert_eq!(actual, expected);
+            opendal_bytes::opendal_bytes_free(&mut result.data);
+        }
+        assert!(result.data.data.is_null());
+        assert_eq!(result.data.len, 0);
+    }
+
+    fn expect_error(result: opendal_result_read, expected: opendal_code) {
+        assert!(!result.error.is_null());
+        assert!(result.data.data.is_null());
+        assert_eq!(result.data.len, 0);
+        unsafe {
+            // Read the error code from the first field per the public C layout.
+            let code = &*result.error.cast::<opendal_code>();
+            assert_eq!(
+                std::mem::discriminant(code),
+                std::mem::discriminant(&expected),
+            );
+            opendal_error::opendal_error_free(result.error);
+        }
+    }
+
+    #[test]
+    fn read_full_range_and_eof() {
+        with_operator(|op| unsafe {
+            let path = CString::new("object").unwrap();
+            expect_data(opendal_operator_read(op, path.as_ptr()), DATA);
+            expect_data(
+                opendal_operator_read_with_range(op, path.as_ptr(), 4, 3),
+                b"3456",
+            );
+            expect_data(
+                opendal_operator_read_with_range(op, path.as_ptr(), 5, 8),
+                b"89",
+            );
+        });
+    }
+
+    #[test]
+    fn read_if_match_preserves_etag_and_range() {
+        with_operator(|op| unsafe {
+            let path = CString::new("object").unwrap();
+            for (etag, matches) in [(ETAG, true), ("different", false)] {
+                let etag = CString::new(etag).unwrap();
+                let result = opendal_operator_read_with_if_match(
+                    op,
+                    path.as_ptr(),
+                    4,
+                    3,
+                    etag.as_ptr(),
+                );
+                if matches {
+                    expect_data(result, b"3456");
+                } else {
+                    expect_error(result, opendal_code::OPENDAL_CONDITION_NOT_MATCH);
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn read_rejects_invalid_strings() {
+        with_operator(|op| unsafe {
+            let path = CString::new("object").unwrap();
+            let invalid = [0xff_u8, 0];
+            for value in [std::ptr::null(), invalid.as_ptr().cast()] {
+                expect_error(
+                    opendal_operator_read(op, value),
+                    opendal_code::OPENDAL_CONFIG_INVALID,
+                );
+                expect_error(
+                    opendal_operator_read_with_if_match(
+                        op,
+                        path.as_ptr(),
+                        1,
+                        0,
+                        value,
+                    ),
+                    opendal_code::OPENDAL_CONFIG_INVALID,
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn read_rejects_empty_and_overflowing_ranges() {
+        with_operator(|op| unsafe {
+            let path = CString::new("object").unwrap();
+            let etag = CString::new(ETAG).unwrap();
+            for (len, offset) in [(0, 0), (1, usize::MAX)] {
+                expect_error(
+                    opendal_operator_read_with_range(
+                        op,
+                        path.as_ptr(),
+                        len,
+                        offset,
+                    ),
+                    opendal_code::OPENDAL_CONFIG_INVALID,
+                );
+                expect_error(
+                    opendal_operator_read_with_if_match(
+                        op,
+                        path.as_ptr(),
+                        len,
+                        offset,
+                        etag.as_ptr(),
+                    ),
+                    opendal_code::OPENDAL_CONFIG_INVALID,
+                );
+            }
+        });
+    }
 }
