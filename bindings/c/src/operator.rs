@@ -698,31 +698,90 @@ pub unsafe extern "C" fn opendal_operator_read(
     op: &opendal_operator,
     path: *const c_char,
 ) -> opendal_result_read {
+    operator_read_impl(op, path, None, None)
+}
+
+/// \brief Blocking read of at most `len` bytes of `path` starting from `offset`.
+///
+/// @param op The created opendal_operator
+/// @param path Path of the object to read
+/// @param len Read length, must be greater than 0
+/// @param offset Starting byte offset; offset + len must not overflow size_t
+/// @return On success, error is NULL and the actual read length is in data.len;
+/// on failure, data is empty and error points to the error information.
+///
+/// \note On success, call opendal_bytes_free(&result.data) to free the data;
+/// on failure, call opendal_error_free(result.error) to free the error.
+///
+/// # Safety
+///
+/// `path` must point to a valid, NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_read_with_range(
+    op: &opendal_operator,
+    path: *const c_char,
+    len: usize,
+    offset: usize,
+) -> opendal_result_read {
+    operator_read_impl(op, path, Some((offset, len)), None)
+}
+
+/// \brief Blocking read of the specified range when the ETag matches.
+///
+/// @param op The created opendal_operator
+/// @param path Path of the object to read
+/// @param len Read length, must be greater than 0
+/// @param offset Starting byte offset; offset + len must not overflow size_t
+/// @param etag If-Match condition; must be non-NULL and is passed to the
+/// storage service as-is
+/// @return The result and memory-freeing rules are the same as
+/// opendal_operator_read_with_range. Returns OPENDAL_CONDITION_NOT_MATCH
+/// when the storage service reports an ETag mismatch.
+///
+/// # Safety
+///
+/// `path` and `etag` must point to valid, NUL-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_operator_read_with_if_match(
+    op: &opendal_operator,
+    path: *const c_char,
+    len: usize,
+    offset: usize,
+    etag: *const c_char,
+) -> opendal_result_read {
+    operator_read_impl(op, path, Some((offset, len)), Some(etag))
+}
+
+fn operator_read_impl(
+    op: &opendal_operator,
+    path: *const c_char,
+    range: Option<(usize, usize)>,
+    etag: Option<*const c_char>,
+) -> opendal_result_read {
     let ret = catch_unwind(|| {
         let _guard = ThreadTenantIdGuard::new(op.tenant_id);
-        let path = match c_char_to_str(path) {
-            Ok(valid_str) => valid_str,
-            Err(e) => {
-                return opendal_result_read {
-                    data: opendal_bytes::empty(),
-                    error: e,
-                };
-            }
-        };
+        let path = c_char_to_str(path)?;
+        let mut read = op.deref().read_with(path);
 
-        match op.deref().read(path) {
-            Ok(b) => opendal_result_read {
-                data: opendal_bytes::new(b),
-                error: std::ptr::null_mut(),
-            },
-            Err(e) => opendal_result_read {
-                data: opendal_bytes::empty(),
-                error: opendal_error::new(e),
-            },
+        if let Some((offset, len)) = range {
+            let end = offset.checked_add(len).filter(|_| len > 0);
+            let end = end.ok_or_else(|| {
+                opendal_error::new(core::Error::new(core::ErrorKind::ConfigInvalid,
+                                                    "invalid read range"))
+            })?;
+            read = read.range((offset as u64)..(end as u64));
         }
+        if let Some(etag) = etag {
+            read = read.if_match(c_char_to_str(etag)?);
+        }
+
+        read.call().map(opendal_bytes::new).map_err(opendal_error::new)
     });
-    match handle_result(ret) {
-        Ok(ret) => ret,
+    match handle_result(ret).and_then(|ret| ret) {
+        Ok(data) => opendal_result_read {
+            data,
+            error: std::ptr::null_mut(),
+        },
         Err(error) => opendal_result_read {
             data: opendal_bytes::empty(),
             error,

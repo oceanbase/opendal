@@ -71,6 +71,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         | StatusCode::PERMANENT_REDIRECT => (ErrorKind::InvalidObjectStorageEndpoint, false),
         StatusCode::NOT_FOUND => (ErrorKind::NotFound, false),
         StatusCode::FORBIDDEN => (ErrorKind::PermissionDenied, false),
+        StatusCode::RANGE_NOT_SATISFIABLE => (ErrorKind::RangeNotSatisfied, false),
         StatusCode::PRECONDITION_FAILED | StatusCode::NOT_MODIFIED | StatusCode::CONFLICT => {
             (ErrorKind::ConditionNotMatch, false)
         }
@@ -192,5 +193,17 @@ mod tests {
             "33537277-6a52-4a2b-b4eb-0f905051827b"
         );
         assert_eq!(out.reason, "invalid receipt format");
+    }
+
+    #[test]
+    fn test_parse_range_not_satisfied() {
+        let body = Buffer::from(Vec::<u8>::new());
+        let resp = Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .body(body)
+            .unwrap();
+
+        let err = parse_error(resp);
+        assert_eq!(err.kind(), ErrorKind::RangeNotSatisfied);
     }
 }

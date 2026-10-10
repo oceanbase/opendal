@@ -42,6 +42,7 @@ pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
         403 => (ErrorKind::PermissionDenied, false),
         404 => (ErrorKind::NotFound, false),
         304 | 412 => (ErrorKind::ConditionNotMatch, false),
+        416 => (ErrorKind::RangeNotSatisfied, false),
         // OSS/OBS/GCS may return 429 error for too many requests.
         429 => (ErrorKind::RateLimited, true),
         // Service like R2 could return 499 error with a message like:
@@ -109,6 +110,7 @@ pub fn parse_s3_error_code(code: &str, msg: &str) -> Option<(ErrorKind, bool)> {
     match code {
         "InvalidObjectName" => Some((ErrorKind::ConfigInvalid, false)),
         "InvalidArgument" => Some((ErrorKind::ConfigInvalid, false)),
+        "InvalidRange" => Some((ErrorKind::RangeNotSatisfied, false)),
         "KeyTooLongError" => Some((ErrorKind::ConfigInvalid, false)),
         // when use obdal to access cos with a uri that exceeds
         // the allowed length, an InvalidURI error is returnd.
