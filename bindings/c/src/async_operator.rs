@@ -271,11 +271,49 @@ pub unsafe extern "C" fn opendal_async_operator_read(
     callback: OpenDalAsyncCallbackFn,
     ctx: *mut c_void,
 ) {
+    async_operator_read_impl(op, path, buf, len, offset, None, callback, ctx);
+}
+
+/// \brief Asynchronously read the specified range when the ETag matches.
+///
+/// `path` and `etag` are copied before the async task is spawned. `op`, `buf`, and `ctx`
+/// must remain valid until `callback` returns.
+#[no_mangle]
+pub unsafe extern "C" fn opendal_async_operator_read_with_if_match(
+    op: &'static opendal_async_operator,
+    path: *const c_char,
+    buf: *mut u8,
+    len: usize,
+    offset: usize,
+    etag: *const c_char,
+    callback: OpenDalAsyncCallbackFn,
+    ctx: *mut c_void,
+) {
+    async_operator_read_impl(op, path, buf, len, offset, Some(etag), callback, ctx);
+}
+
+unsafe fn async_operator_read_impl(
+    op: &'static opendal_async_operator,
+    path: *const c_char,
+    buf: *mut u8,
+    len: usize,
+    offset: usize,
+    if_match: Option<*const c_char>,
+    callback: OpenDalAsyncCallbackFn,
+    ctx: *mut c_void,
+) {
     let err = obdal_catch_unwind(|| {
         let _guard = ThreadTenantIdGuard::new(op.tenant_id);
         let path = match c_char_to_str(path) {
-            Ok(valid_str) => valid_str,
+            Ok(valid_str) => valid_str.to_owned(),
             Err(e) => return e,
+        };
+        let if_match = match if_match {
+            Some(if_match) => match c_char_to_str(if_match) {
+                Ok(valid_str) => Some(valid_str.to_owned()),
+                Err(e) => return e,
+            },
+            None => None,
         };
 
         if buf.is_null() || len == 0 {
@@ -285,14 +323,27 @@ pub unsafe extern "C" fn opendal_async_operator_read(
             ));
         }
 
-        let range = (offset as u64)..((offset + len) as u64);
+        let end = match offset.checked_add(len) {
+            Some(end) => end,
+            None => {
+                return opendal_error::new(core::Error::new(
+                    core::ErrorKind::ConfigInvalid,
+                    "invalid read range",
+                ));
+            }
+        };
+        let range = (offset as u64)..(end as u64);
         let buf_clone = buf as usize;
         let callback_clone = callback.clone();
         let ctx_clone = ctx as usize;
 
         obdal_spawn(
             async move {
-                let ret = op.deref().read_with(path).range(range).await;
+                let mut read = op.deref().read_with(&path).range(range);
+                if let Some(if_match) = if_match.as_deref() {
+                    read = read.if_match(if_match);
+                }
+                let ret = read.await;
                 match ret {
                     Ok(mut buffer) => {
                         let read_len = buffer.len();

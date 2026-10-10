@@ -62,6 +62,62 @@ TEST_F(ObDalTest, test_rw)
   opendal_reader_free(reader);
 }
 
+TEST_F(ObDalTest, test_read_with_if_match)
+{
+  std::string path = base_path_ + "async_read_with_if_match";
+  const char *content = "this_string_length_is_24";
+  opendal_bytes data = {
+    .data = (uint8_t*)content,
+    .len = strlen(content),
+  };
+
+  opendal_error *error = opendal_operator_write(op_, path.c_str(), &data);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  opendal_result_stat stat = opendal_operator_stat(op_, path.c_str());
+  dump_error(stat.error);
+  ASSERT_EQ(nullptr, stat.error);
+  ASSERT_NE(nullptr, stat.meta);
+  char *etag = opendal_metadata_etag(stat.meta);
+  ASSERT_NE(nullptr, etag);
+
+  uint8_t buf[4] = { 0 };
+  ObDalAsyncContext context;
+  opendal_async_operator_read_with_if_match(async_op_,
+                                            path.c_str(),
+                                            buf,
+                                            sizeof(buf),
+                                            5,
+                                            etag,
+                                            obdal_async_callback,
+                                            &context);
+  context.wait();
+  dump_error(context.error_);
+  ASSERT_EQ(nullptr, context.error_);
+  ASSERT_EQ(static_cast<int64_t>(sizeof(buf)), context.length_);
+  ASSERT_EQ(0, memcmp(buf, content + 5, sizeof(buf)));
+
+  context.reset();
+  opendal_async_operator_read_with_if_match(async_op_,
+                                            path.c_str(),
+                                            buf,
+                                            sizeof(buf),
+                                            5,
+                                            "\"mismatched-etag\"",
+                                            obdal_async_callback,
+                                            &context);
+  context.wait();
+  dump_error(context.error_);
+  ASSERT_NE(nullptr, context.error_);
+  ASSERT_EQ(OPENDAL_CONDITION_NOT_MATCH, context.error_->code);
+  ASSERT_EQ(0, context.length_);
+
+  free_error(context.error_);
+  opendal_c_char_free(etag);
+  opendal_metadata_free(stat.meta);
+}
+
 TEST_F(ObDalTest, test_write_with_if_match)
 {
   std::string path = base_path_ + "obdal_async_test_write_with_if_match";

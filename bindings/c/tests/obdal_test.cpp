@@ -880,7 +880,7 @@ TEST_F(ObDalTest, test_read_with_if_match)
   dump_error(r.error);
   ASSERT_EQ(nullptr, r.error);
   ASSERT_EQ(24, r.data.len);
-  ASSERT_EQ(0, strcmp(r.data, content));
+  ASSERT_EQ(0, memcmp(r.data.data, content, 24));
   opendal_bytes_free(&r.data);
 
   // 4. Read a sub range with the matching ETag
@@ -1038,6 +1038,28 @@ TEST_F(ObDalTest, test_put_then_append_invalid_blob_type)
     free_error(err);
   }
   opendal_writer_free(writer);
+}
+
+TEST_F(ObDalTest, test_read_offset_beyond_object_size)
+{
+  std::string path = base_path_ + "read_offset_beyond_object_size";
+  const char *content = "short content";
+  opendal_bytes data = {
+    .data = (uint8_t *)content,
+    .len = strlen(content),
+  };
+
+  opendal_error *error = opendal_operator_write(op_, path.c_str(), &data);
+  dump_error(error);
+  ASSERT_EQ(nullptr, error);
+
+  opendal_result_read result = opendal_operator_read_with_range(op_, path.c_str(), 1, data.len + 1);
+  dump_error(result.error);
+  ASSERT_NE(nullptr, result.error);
+  ASSERT_EQ(OPENDAL_RANGE_NOT_SATISFIED, result.error->code);
+  ASSERT_EQ(nullptr, result.data.data);
+  ASSERT_EQ(0, result.data.len);
+  free_error(result.error);
 }
 
 TEST_F(ObDalTest, test_catch_panic)

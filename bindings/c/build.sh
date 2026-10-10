@@ -2,7 +2,7 @@
 
 REDHAT=$(grep -Po '(?<=release )\d' /etc/redhat-release)
 ID=$(grep -Po '(?<=^ID=).*' /etc/os-release | tr -d '"')
-DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/el"
+DOWNLOAD_BASE_URL="http://yum-test.obvos.alibaba-inc.com/oceanbase/development-kit/el"
 CUR_DIR=$(dirname $(readlink -f "$0"))
 
 # 安装依赖
@@ -44,7 +44,7 @@ elif [[ "${ID}"x != "alinux"x ]]; then
     export CXX=$TARGET_DIR_3rd/usr/local/oceanbase/devtools/bin/g++
 elif [[ "${REDHAT}"x == "3"x ]]; then
     REDHAT=8
-    DOWNLOAD_BASE_URL="https://mirrors.aliyun.com/oceanbase/development-kit/al"
+    DOWNLOAD_BASE_URL="http://yum-test.obvos.alibaba-inc.com/oceanbase/development-kit/al"
     dep_pkgs=(
         obdevtools-cmake-3.22.1-142025032516
         obdevtools-gcc9-9.3.0-152024092711

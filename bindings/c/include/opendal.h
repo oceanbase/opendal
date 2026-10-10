@@ -1840,6 +1840,21 @@ void opendal_async_operator_read(const struct opendal_async_operator *op,
                                  void *ctx);
 
 /**
+ * \brief Asynchronously read the specified range when the ETag matches.
+ *
+ * `path` and `etag` are copied before the async task is spawned. `op`, `buf`, and `ctx`
+ * must remain valid until `callback` returns.
+ */
+void opendal_async_operator_read_with_if_match(const struct opendal_async_operator *op,
+                                               const char *path,
+                                               uint8_t *buf,
+                                               uintptr_t len,
+                                               uintptr_t offset,
+                                               const char *etag,
+                                               OpenDalAsyncCallbackFn callback,
+                                               void *ctx);
+
+/**
  * write with if match, only the object is not exist, or the content
  * is match, the write will succeed. Because not all the services support if_match,
  * we use write with if not exists and read to implement it.
